@@ -7,10 +7,42 @@ This is a full-stack **Performance Review Monitoring System** composed of:
 | Layer | Technology |
 |-------|-----------|
 | Backend API | .NET 8 Web API, C#, Entity Framework Core 8, SQL Server |
-| Frontend | React 18 (Vite), plain CSS |
+| Frontend | React 18 + TypeScript, Vite 6, Tailwind CSS 3, React Query (TanStack Query v5), axios |
 | Infrastructure | Docker, Docker Compose, Nginx |
 
-The system allows HR managers to track employee performance review cycles, assign review sessions, and monitor completion status.
+The system allows HR managers to track employee performance review cycles, assign review sessions, and monitor completion status. Employees log in via a JWT-secured Login page and see their personal **EmployeeDashboard**, which displays the current performance review status (due or upcoming). Managers can also view team status via the API. A background scheduler automatically emails reminders to employees and summary reports to managers.
+
+---
+
+## Key Functionality
+
+### Authentication Flow
+1. User navigates to the app → `LoginPage` is shown (stored JWT absent or expired).
+2. `LoginPage` calls `POST /api/auth/login` via **axios** (`src/api/client.ts`).
+3. On success the JWT is stored in `localStorage` under the key `token`.
+4. `App.tsx` detects the token and renders the main application; `apiClient` attaches `Authorization: Bearer <token>` to all subsequent requests via an axios request interceptor.
+5. Logout clears `localStorage` and the React Query cache.
+
+### EmployeeDashboard
+- Mounted when the decoded JWT contains an `EmployeeId` claim.
+- Uses **React Query** (`useQuery`) to fetch `GET /api/reviewsessions/employee/{employeeId}`.
+- Shows a **Performance Review Status card**:
+  - If any `Pending` session has a deadline within the next 30 days → displays **"Start Review"** button.
+  - Clicking "Start Review" calls `POST /api/reviews/{id}/submit` via a `useMutation`.
+  - If no review is currently due but upcoming sessions exist → shows the **next scheduled date**.
+  - If all sessions are completed → shows a "Great work!" completion message.
+- Uses **CSS Flexbox** (Tailwind utility classes) for a responsive layout.
+
+### LoginPage
+- Clean, modern CSS file (`LoginPage.css`) with centered card using Flexbox, blue/grey corporate colour palette.
+- Form fields: `username`, `password`.
+- Displays an inline error alert on `401 Unauthorized` (or network failure).
+- Button is disabled while the request is in-flight.
+
+### Admin/Manager Views
+- **EmployeeList**: CRUD table for managing employees (create, list, delete).
+- **ReviewSessionList**: CRUD table for scheduling and managing review sessions.
+- Both require a logged-in session (token is sent via the axios interceptor).
 
 ---
 
@@ -19,34 +51,78 @@ The system allows HR managers to track employee performance review cycles, assig
 ```
 api/
   Controllers/
-    EmployeesController.cs       – CRUD for Employee
-    ReviewSessionsController.cs  – CRUD for ReviewSession
+    AuthController.cs            – POST /api/auth/login (issues JWT)
+    EmployeesController.cs       – CRUD for Employee (delegates to IEmployeeRepository)
+    ReviewController.cs          – Auth-protected: submit review + manager team-status
+    ReviewSessionsController.cs  – CRUD for ReviewSession (delegates to IReviewSessionRepository)
   Data/
     AppDbContext.cs               – EF Core DbContext, Fluent API config
+  DTOs/
+    LoginRequest.cs              – Username + Password for login
+    SubmitReviewRequest.cs       – Optional Notes when completing a review
+    SubordinateReviewStatusDto.cs – Manager team-status response shape
+  Helpers/
+    PasswordHashHelper.cs        – PBKDF2 password hashing/verification
+  Middleware/
+    GlobalExceptionMiddleware.cs – Catches unhandled exceptions, logs, returns 500 JSON
   Migrations/                    – Auto-generated EF Core migrations
   Models/
     Employee.cs                  – Employee POCO
-    ReviewSession.cs             – ReviewSession POCO
+    ReviewSession.cs             – ReviewSession POCO (includes optional Notes field)
     ReviewStatus.cs              – Enum: Pending | Completed
-  Program.cs                     – App bootstrap, DI, middleware, auto-migrate
-  appsettings.json               – Connection string (Docker target: "db")
-  appsettings.Development.json   – Connection string (localhost)
+    User.cs                      – User POCO (Username, PasswordHash, Role, EmployeeId FK)
+  Repositories/
+    IEmployeeRepository.cs / EmployeeRepository.cs
+    IReviewSessionRepository.cs / ReviewSessionRepository.cs
+    IUserRepository.cs / UserRepository.cs
+  Services/
+    IEmailService.cs / EmailService.cs   – MailKit SMTP
+    ReviewSchedulerService.cs           – BackgroundService: reminders + manager summaries
+  Validators/
+    SubmitReviewRequestValidator.cs – FluentValidation: Notes max 2000 chars
+  Program.cs                     – App bootstrap, DI, JWT, FluentValidation, middleware, auto-migrate
+  appsettings.json               – Connection string + JwtSettings + EmailSettings
+  appsettings.Development.json   – Local overrides
   PerformanceReviewApi.csproj
   Dockerfile
 
 frontend/
   src/
+    __tests__/
+      LoginPage.test.tsx          – Vitest + Testing Library tests for LoginPage
+    api/
+      client.ts                   – axios instance; reads VITE_API_URL from .env; attaches JWT
     components/
-      EmployeeList.jsx           – Employee table + create/delete form
-      ReviewSessionList.jsx      – Review session table + create/delete form
-    App.jsx                      – Root component with tab navigation
-    main.jsx                     – ReactDOM entry point
-    index.css                    – Global styles
-  index.html
-  vite.config.js                 – Vite + proxy /api → backend
-  nginx.conf                     – Nginx: serve SPA + proxy /api
-  package.json
+      EmployeeList.tsx            – Employee CRUD table
+      ReviewSessionList.tsx       – Review session CRUD table
+    pages/
+      LoginPage.tsx               – Login form (axios, localStorage, error handling)
+      LoginPage.css               – Login card styles (blue/grey palette, centered)
+      EmployeeDashboard.tsx       – Employee review status card + React Query data fetching
+    types/
+      index.ts                    – Shared TypeScript interfaces (Employee, ReviewSession, etc.)
+    App.tsx                       – Root component; auth-based routing (Login ↔ Dashboard)
+    main.tsx                      – ReactDOM entry point; wraps app in QueryClientProvider
+    setupTests.ts                 – Vitest global setup (@testing-library/jest-dom)
+    vite-env.d.ts                 – VITE_API_URL ImportMeta type declaration
+    index.css                     – Tailwind directives + global styles
+  .env                            – VITE_API_URL (gitignored, copy from .env.example)
+  .env.example                    – Environment variable template
+  tailwind.config.js              – Tailwind content paths
+  postcss.config.js               – Tailwind + Autoprefixer PostCSS plugins
+  tsconfig.json                   – TypeScript compiler config (strict, JSX react-jsx)
+  tsconfig.node.json              – TypeScript config for vite.config.ts
+  vite.config.ts                  – Vite config: React plugin, dev proxy, Vitest settings
+  nginx.conf                      – Nginx: serve SPA + proxy /api → backend
+  package.json                    – scripts: dev / build / preview / test / type-check
   Dockerfile
+
+tests/
+  PerformanceReviewApi.Tests/
+    Integration/
+      ReviewIntegrationTests.cs  – WebApplicationFactory integration tests
+    Services/
+      ReviewSchedulerServiceTests.cs  – xUnit + Moq unit tests for ReviewSchedulerService
 
 docker-compose.yml               – db + api + frontend services
 README.md
@@ -55,80 +131,203 @@ copilot-instructions.md          – This file
 
 ---
 
+## Architecture & Layers
+
+```
+Browser
+    │
+    ▼
+React SPA (Vite / Nginx)
+  LoginPage  ──axios──►  POST /api/auth/login  ──► JWT stored in localStorage
+  App.tsx    (reads token, decodes claims)
+  EmployeeDashboard  ──React Query──►  GET /api/reviewsessions/employee/{id}
+  EmployeeList       ──axios──►  GET|POST|DELETE /api/employees
+  ReviewSessionList  ──axios──►  GET|POST|DELETE /api/reviewsessions
+    │
+    │  HTTP (proxied by Vite dev-server OR Nginx in production)
+    ▼
+GlobalExceptionMiddleware  (api/Middleware/)
+    │
+JWT Authentication Middleware
+    │
+Controller  (api/Controllers/)
+    │
+Repository Interface  (api/Repositories/I*Repository.cs)
+    │
+Repository Impl → AppDbContext → SQL Server
+
+BackgroundService (ReviewSchedulerService)
+    │  resolves scoped repo via IServiceScopeFactory
+    ▼
+IReviewSessionRepository  →  IEmailService (MailKit SMTP)
+```
+
+---
+
+## Authentication & Authorisation
+
+JWT Bearer tokens issued by `POST /api/auth/login`.  
+Token claims: `sub` (userId), `unique_name` (username), `role` ("Manager" or "Employee"), `EmployeeId`.
+
+**Frontend token usage (`src/api/client.ts`):**
+```ts
+apiClient.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token')
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
+})
+```
+
+**Protecting API endpoints:**
+- `[Authorize]` – any valid JWT.
+- `[Authorize(Roles = "Manager")]` – Manager role only.
+
+**JWT configuration (`appsettings.json` → `JwtSettings`):**
+```json
+"JwtSettings": {
+  "SecretKey": "PerformanceReviewSystem-SuperSecret-Key-2026!",
+  "Issuer": "PerformanceReviewApi",
+  "Audience": "PerformanceReviewClient",
+  "ExpiresInHours": "8"
+}
+```
+
+> Replace `SecretKey` with a strong secret (≥ 32 chars) in production.
+
+---
+
 ## Domain Model
 
 ### Employee
-- **Id** `int` – primary key  
-- **Name** `string` – required, max 100  
-- **Email** `string` – required, max 200  
-- **Position** `string` – required, max 100  
-- **HireDate** `DateTime` – required  
-- **ManagerId** `int?` – nullable FK to `Employee.Id` (self-reference)  
-- **Manager** `Employee?` – navigation property  
-- **Subordinates** `ICollection<Employee>` – navigation property  
-- **ReviewSessions** `ICollection<ReviewSession>` – navigation property  
+- **Id**, **Name**, **Email**, **Position**, **HireDate** – core fields
+- **ManagerId** `int?` – nullable self-referencing FK
+- **ReviewSessions** `ICollection<ReviewSession>` – navigation
 
 ### ReviewSession
-- **Id** `int` – primary key  
-- **EmployeeId** `int` – FK to `Employee.Id` (cascade delete)  
-- **Status** `ReviewStatus` – enum, stored as string (`Pending` / `Completed`)  
-- **ScheduledDate** `DateTime` – required  
-- **Deadline** `DateTime` – required  
-- **Employee** `Employee` – navigation property  
+- **Id**, **EmployeeId**, **Status** (`Pending|Completed`), **ScheduledDate**, **Deadline**, **Notes** `string?`
 
-### Relationships
-- **Manager → Subordinates**: one-to-many self-referencing on `Employee`. Delete behaviour: `RESTRICT` (cannot delete a manager while they have subordinates).  
-- **Employee → ReviewSessions**: one-to-many. Delete behaviour: `CASCADE`.
+### User
+- **Id**, **Username** (unique), **PasswordHash** (PBKDF2 `salt:hash`), **Role**, **EmployeeId** `int?`
+
+### TypeScript types (`frontend/src/types/index.ts`)
+- `Employee`, `ReviewSession`, `ReviewStatus`, `LoginRequest`, `LoginResponse`, `DecodedToken`, `SubmitReviewRequest`
+
+---
+
+## React / Frontend Conventions
+
+- **Language**: TypeScript (strict mode). All source files use `.tsx` / `.ts`.
+- **Styling**: Tailwind CSS utility classes for layout; custom CSS files for component-specific styles (e.g. `LoginPage.css`).
+- **Data fetching**: **React Query** (`@tanstack/react-query`) for server state – queries, mutations, cache invalidation.
+- **HTTP client**: **axios** via the shared `src/api/client.ts` instance.  
+  The base URL is read from `import.meta.env.VITE_API_URL` (`.env` file).
+- **Auth state**: stored in `localStorage` (key: `token`); `App.tsx` reads it on mount.
+- **Components**: functional components with hooks only (no class components).
+- **API proxy**: `/api` is proxied to `http://localhost:5000` by `vite.config.ts` in dev, and by `nginx.conf` in production Docker.
+
+---
+
+## Testing
+
+### Frontend (Vitest + Testing Library)
+- Test files live in `src/__tests__/`.
+- Setup file: `src/setupTests.ts` (imports `@testing-library/jest-dom`).
+- HTTP mocking: `axios-mock-adapter` wraps the shared `apiClient`.
+- Run: `cd frontend && npm test`
+
+### Backend (xUnit + Moq)
+- Integration tests use `WebApplicationFactory` with an in-memory DB.
+- Unit tests use `Moq` for repositories and `TimeProvider` for deterministic scheduling.
+- Run: `cd tests/PerformanceReviewApi.Tests && dotnet test`
 
 ---
 
 ## Key Conventions
 
 ### C# / .NET
-- **Namespace**: `PerformanceReviewApi` (root), sub-namespaces per folder (`*.Models`, `*.Data`, `*.Controllers`).
-- **File-scoped namespaces** (`namespace Foo;`) for all C# files.
-- **Implicit usings** and **nullable reference types** are enabled.
-- **Enum serialisation**: `ReviewStatus` is stored as a string in SQL Server and serialised as a string in JSON (`JsonStringEnumConverter`).
-- **Circular reference handling**: `ReferenceHandler.IgnoreCycles` is applied globally.
-- **Auto-migration**: `db.Database.Migrate()` runs at startup so the schema is always current.
-- **CORS**: permissive default policy (any origin/method/header) – tighten for production.
-- **Swagger**: always enabled (both dev and production inside Docker).
-
-### React / Vite
-- Components are functional with hooks (`useState`, `useEffect`).
-- API calls use the native `fetch` API.
-- `/api` requests are reverse-proxied via Nginx (`nginx.conf`) in production and via Vite's `server.proxy` in development.
+- **Namespace**: `PerformanceReviewApi.*` per folder.
+- **File-scoped namespaces**, **implicit usings**, **nullable reference types** enabled.
+- **Enum serialisation**: `ReviewStatus` stored/serialised as string.
+- **Circular reference handling**: `ReferenceHandler.IgnoreCycles` applied globally.
+- **Auto-migration**: runs at startup.
+- **FluentValidation**: validators in `api/Validators/`, auto-scanned.
+- **Password hashing**: `Rfc2898DeriveBytes.Pbkdf2` (SHA-256, 100 000 iterations).
 
 ### Docker
-- The **API** Dockerfile uses a multi-stage build (`sdk` → `aspnet`).
-- The **frontend** Dockerfile uses a multi-stage build (`node` → `nginx:alpine`).
-- `docker-compose.yml` includes a **healthcheck** on SQL Server so the API only starts after the DB is ready.
-- The SQL Server password used everywhere is `YourStrong@Passw0rd` – **replace with a secret in production**.
+- Multi-stage builds for both API (`sdk→aspnet`) and frontend (`node→nginx`).
+- Healthcheck on SQL Server; API waits for DB to be healthy before starting.
+- SQL Server password `YourStrong@Passw0rd` – **replace in production**.
 
 ---
 
 ## Common Tasks (for Copilot)
 
 ### Add a new entity
-1. Create a POCO in `api/Models/`.
-2. Add a `DbSet<T>` in `AppDbContext`.
-3. Add Fluent API configuration in `AppDbContext.OnModelCreating`.
-4. Run `dotnet ef migrations add <Name>`.
-5. Create a controller in `api/Controllers/`.
-6. Add a React component in `frontend/src/components/`.
+1. POCO in `api/Models/` → `DbSet` + Fluent config in `AppDbContext`.
+2. `dotnet ef migrations add <Name>`.
+3. `I<Entity>Repository` + implementation in `api/Repositories/`.
+4. Register in `Program.cs` as `AddScoped`.
+5. Controller in `api/Controllers/`.
+6. TypeScript interface in `frontend/src/types/index.ts`.
+7. React component in `frontend/src/components/`.
+
+### Protect a new endpoint with JWT
+```csharp
+[Authorize]                        // any valid JWT
+[Authorize(Roles = "Manager")]    // Manager role only
+```
+Read claims: `User.FindFirst("EmployeeId")?.Value`
+
+### Add FluentValidation to a new endpoint
+1. Create validator in `api/Validators/` extending `AbstractValidator<TRequest>`.
+2. Inject `IValidator<TRequest>` into the controller.
+3. Call `await _validator.ValidateAsync(request)`; return `BadRequest(errors)` when invalid.
+
+### Add a new React Query hook
+```ts
+const { data, isLoading, isError } = useQuery({
+  queryKey: ['myEntity', id],
+  queryFn: async () => {
+    const { data } = await apiClient.get<MyEntity[]>(`/api/myentity/${id}`)
+    return data
+  },
+})
+```
+
+### Create a new user (seeding)
+```csharp
+await userRepository.CreateAsync(new User {
+    Username = "alice",
+    PasswordHash = PasswordHashHelper.Hash("SecurePass!"),
+    Role = "Manager",
+    EmployeeId = 1
+});
+```
 
 ### Change ReviewStatus values
-Edit `api/Models/ReviewStatus.cs`. If adding a value, create a new EF migration. Update the `<select>` in `ReviewSessionList.jsx`.
+1. Edit `api/Models/ReviewStatus.cs`.
+2. Create a new EF migration.
+3. Update the `<select>` in `ReviewSessionList.tsx`.
+4. Update the `ReviewStatus` union type in `frontend/src/types/index.ts`.
 
 ### Add a new API field
-1. Update the POCO in `api/Models/`.
-2. Create an EF migration (`dotnet ef migrations add ...`).
-3. Update the controller if validation is needed.
-4. Update the corresponding React form and table.
+1. Update POCO → migration → repository (if new queries needed) → controller validation.
+2. Update TypeScript interface in `src/types/index.ts`.
+3. Update form + table in the corresponding React component.
 
-### Run the stack
+### Run the full stack
 ```bash
 docker compose up --build
+```
+
+### Run frontend tests
+```bash
+cd frontend && npm test
+```
+
+### Run backend tests
+```bash
+cd tests/PerformanceReviewApi.Tests && dotnet test
 ```
 
 ### Apply DB migrations manually
