@@ -42,7 +42,8 @@ app.UseCors();
 app.UseAuthorization();
 app.MapControllers();
 
-// Apply pending EF Core migrations and seed test data on startup
+// Apply pending EF Core migrations on startup.
+// Demo data is only seeded in Development and Testing environments.
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -51,7 +52,9 @@ using (var scope = app.Services.CreateScope())
         db.Database.Migrate();
     else
         db.Database.EnsureCreated();
-    DbSeeder.Seed(db);
+
+    if (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Testing"))
+        DbSeeder.Seed(db);
 }
 
 app.Run();
