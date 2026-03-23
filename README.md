@@ -1,6 +1,6 @@
 # Performance Review Monitoring System
 
-A full-stack application for managing employee performance reviews, built with **.NET 8 Web API**, **React (Vite)**, and **SQL Server**, fully containerised with Docker.
+A full-stack application for managing employee performance reviews, built with **.NET 8 Web API**, **React 18 + TypeScript (Vite)**, and **SQL Server**, fully containerised with Docker.
 
 ---
 
@@ -18,16 +18,28 @@ A full-stack application for managing employee performance reviews, built with *
 │   ├── appsettings.json
 │   ├── Dockerfile
 │   └── PerformanceReviewApi.csproj
-├── frontend/                   # React + Vite SPA
+├── frontend/                   # React 18 + TypeScript + Vite SPA
 │   ├── src/
-│   │   ├── components/
-│   │   ├── App.jsx
-│   │   └── main.jsx
+│   │   ├── __tests__/          # Vitest tests (LoginPage.test.tsx)
+│   │   ├── api/                # axios client (client.ts)
+│   │   ├── components/         # EmployeeList.tsx, ReviewSessionList.tsx
+│   │   ├── pages/              # LoginPage.tsx, EmployeeDashboard.tsx
+│   │   ├── types/              # Shared TypeScript types (index.ts)
+│   │   ├── App.tsx             # Root component – auth routing
+│   │   ├── main.tsx            # ReactDOM entry point
+│   │   ├── setupTests.ts       # Vitest global setup
+│   │   └── index.css           # Global styles (Tailwind + custom)
+│   ├── .env                    # VITE_API_URL (copy from .env.example)
+│   ├── .env.example            # Environment variable template
+│   ├── tailwind.config.js
+│   ├── postcss.config.js
+│   ├── tsconfig.json
+│   ├── vite.config.ts
 │   ├── Dockerfile
 │   ├── nginx.conf
 │   └── package.json
 ├── tests/
-│   └── PerformanceReviewApi.Tests/   # xUnit + Moq unit tests
+│   └── PerformanceReviewApi.Tests/   # xUnit + Moq unit & integration tests
 ├── docker-compose.yml
 └── README.md
 ```
@@ -59,7 +71,7 @@ docker compose up --build
 This command will:
 - Pull the **SQL Server 2022** image and initialise the database
 - Build and start the **.NET 8 API** (auto-runs EF Core migrations on first boot)
-- Build and start the **React frontend** via Nginx
+- Build and compile the **React + TypeScript frontend** and serve it via Nginx
 
 ### 3. Open the application
 
@@ -79,6 +91,25 @@ To also remove the database volume:
 docker compose down -v
 ```
 
+### 5. Rebuild a single service
+```bash
+# Rebuild only the frontend image
+docker compose build frontend
+
+# Rebuild only the API image
+docker compose build api
+```
+
+### 6. View logs
+```bash
+# All services
+docker compose logs -f
+
+# Single service
+docker compose logs -f api
+docker compose logs -f frontend
+```
+
 ---
 
 ## Run Locally (without Docker)
@@ -90,17 +121,56 @@ dotnet restore
 # Point to a local SQL Server instance in appsettings.Development.json
 dotnet ef database update      # apply migrations
 dotnet run
+# API is available at http://localhost:5000
 ```
 
 ### Frontend
 ```bash
 cd frontend
+cp .env.example .env           # configure VITE_API_URL if needed
 npm install
-npm run dev          # starts Vite dev server on http://localhost:5173
+npm run dev                    # starts Vite dev server on http://localhost:5173
 ```
 
-> **Note:** The Vite dev-server proxies `/api` requests to `http://api:8080`.  
-> When running locally, update `vite.config.js` to point `target` at `http://localhost:5000`.
+> **Note:** `vite.config.ts` proxies `/api` requests to `http://localhost:5000` in dev mode.
+
+---
+
+## Frontend Development
+
+### Available scripts
+
+```bash
+# Start Vite dev server (hot reload)
+npm run dev
+
+# Production build
+npm run build
+
+# Preview the production build locally
+npm run preview
+
+# Run Vitest tests (single run)
+npm test
+
+# Run Vitest in watch mode
+npm run test:watch
+
+# Type-check without building
+npm run type-check
+```
+
+### Environment variables
+
+Copy `.env.example` to `.env` and set the values:
+
+```bash
+cp frontend/.env.example frontend/.env
+```
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VITE_API_URL` | *(empty)* | Full API base URL. Leave empty to use Vite/Nginx proxy. Set to `http://localhost:5000` for direct access without a proxy. |
 
 ---
 
@@ -121,7 +191,29 @@ dotnet ef migrations remove
 
 ---
 
+## Running Tests
+
+### Backend (xUnit + Moq)
+```bash
+cd tests/PerformanceReviewApi.Tests
+dotnet test
+```
+
+### Frontend (Vitest + Testing Library)
+```bash
+cd frontend
+npm test
+```
+
+---
+
 ## API Endpoints
+
+### Authentication
+
+| Method | Route | Description |
+|--------|-------|-------------|
+| POST | `/api/auth/login` | Authenticate and receive a JWT token |
 
 ### Employees  `GET|POST /api/employees`  ·  `GET|PUT|DELETE /api/employees/{id}`
 
@@ -144,6 +236,13 @@ dotnet ef migrations remove
 | PUT | `/api/reviewsessions/{id}` | Update a session |
 | DELETE | `/api/reviewsessions/{id}` | Delete a session |
 
+### Reviews  *(requires JWT)*
+
+| Method | Route | Description |
+|--------|-------|-------------|
+| POST | `/api/reviews/{id}/submit` | Complete a review session (add notes) |
+| GET | `/api/reviews/team-status` | Manager: view all subordinate review statuses |
+
 ---
 
 ## Database Schema
@@ -165,22 +264,37 @@ EmployeeId     INT          NOT NULL  →  FK → Employee(Id)  [CASCADE]
 Status         NVARCHAR     NOT NULL  (Pending | Completed)
 ScheduledDate  DATETIME2    NOT NULL
 Deadline       DATETIME2    NOT NULL
+Notes          NVARCHAR(MAX) NULL
+
+User
+────────────────────────────────────────
+Id             INT IDENTITY PK
+Username       NVARCHAR(100) NOT NULL  [unique]
+PasswordHash   NVARCHAR(MAX) NOT NULL  (PBKDF2: salt:hash)
+Role           NVARCHAR(50)  NOT NULL  (Manager | Employee)
+EmployeeId     INT           NULL  →  FK → Employee(Id)  [SetNull]
 ```
 
 **Relationships**
 
 - `Employee.ManagerId → Employee.Id`: self-referencing one-to-many — one Manager has many Subordinates.
 - `ReviewSession.EmployeeId → Employee.Id`: one Employee has many ReviewSessions.
+- `User.EmployeeId → Employee.Id`: optional link between a login account and an employee record.
 
 ---
 
 ## Environment Variables
 
-The API reads its connection string from the environment:
+### API (set via `docker-compose.yml` or shell environment)
 
-```
-ConnectionStrings__DefaultConnection=Server=db;Database=PerformanceReviewDb;...
-```
+| Variable | Example | Description |
+|----------|---------|-------------|
+| `ConnectionStrings__DefaultConnection` | `Server=db;Database=...` | SQL Server connection string |
+| `ASPNETCORE_ENVIRONMENT` | `Production` | ASP.NET Core environment |
+| `JwtSettings__SecretKey` | *see appsettings.json* | JWT signing secret (replace in production) |
 
-This is set automatically by `docker-compose.yml`. Override it in your own environment or a `.env` file for custom deployments.
+### Frontend (set in `frontend/.env`)
 
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VITE_API_URL` | *(empty)* | API base URL; empty = use proxy |
