@@ -1,7 +1,11 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import MockAdapter from 'axios-mock-adapter'
 import ReviewSessionList from '../../components/ReviewSessionList'
+import apiClient from '../../api/client'
+
+const mock = new MockAdapter(apiClient)
 
 const mockSessions = [
   {
@@ -21,18 +25,19 @@ const mockSessions = [
 ]
 
 beforeEach(() => {
+  mock.reset()
   vi.restoreAllMocks()
 })
 
 describe('ReviewSessionList', () => {
   it('shows loading state while fetching', () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: () => new Promise(() => {}) })
+    mock.onGet('/api/reviewsessions').reply(() => new Promise(() => {}))
     render(<ReviewSessionList />)
     expect(screen.getByText(/loading/i)).toBeInTheDocument()
   })
 
   it('displays sessions from the API', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(mockSessions) })
+    mock.onGet('/api/reviewsessions').reply(200, mockSessions)
     render(<ReviewSessionList />)
 
     await waitFor(() => expect(screen.getByText('David Lee')).toBeInTheDocument())
@@ -40,7 +45,7 @@ describe('ReviewSessionList', () => {
   })
 
   it('renders Pending and Completed status badges', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(mockSessions) })
+    mock.onGet('/api/reviewsessions').reply(200, mockSessions)
     render(<ReviewSessionList />)
 
     // Use selector:'span' to avoid matching the <select> options in the form
@@ -49,7 +54,7 @@ describe('ReviewSessionList', () => {
   })
 
   it('applies correct badge CSS classes for statuses', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(mockSessions) })
+    mock.onGet('/api/reviewsessions').reply(200, mockSessions)
     render(<ReviewSessionList />)
 
     await waitFor(() => {
@@ -62,22 +67,21 @@ describe('ReviewSessionList', () => {
   })
 
   it('shows empty state when no sessions returned', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve([]) })
+    mock.onGet('/api/reviewsessions').reply(200, [])
     render(<ReviewSessionList />)
     await waitFor(() => expect(screen.getByText(/no review sessions found/i)).toBeInTheDocument())
   })
 
   it('shows error message when API returns non-OK status', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 500 })
+    mock.onGet('/api/reviewsessions').reply(500)
     render(<ReviewSessionList />)
     await waitFor(() => expect(screen.getByText(/HTTP 500/i)).toBeInTheDocument())
   })
 
   it('calls DELETE endpoint when Delete button is clicked and confirmed', async () => {
-    global.fetch = vi.fn()
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(mockSessions) })
-      .mockResolvedValueOnce({ ok: true })
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([mockSessions[1]]) })
+    mock.onGet('/api/reviewsessions').replyOnce(200, mockSessions)
+    mock.onDelete('/api/reviewsessions/1').replyOnce(200)
+    mock.onGet('/api/reviewsessions').replyOnce(200, [mockSessions[1]])
 
     vi.stubGlobal('confirm', () => true)
 
@@ -88,8 +92,7 @@ describe('ReviewSessionList', () => {
     await user.click(screen.getAllByRole('button', { name: /delete/i })[0])
 
     await waitFor(() => {
-      const calls = global.fetch.mock.calls
-      expect(calls.some(([url, opts]) => opts?.method === 'DELETE' && url.includes('/api/reviewsessions/'))).toBe(true)
+      expect(mock.history.delete.some((request) => request.url?.includes('/api/reviewsessions/1'))).toBe(true)
     })
   })
 })

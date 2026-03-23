@@ -1,10 +1,18 @@
 using FluentValidation;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
 using PerformanceReviewApi.Data;
 using PerformanceReviewApi.Repositories;
 using PerformanceReviewApi.Validators;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
+var jwtSection = builder.Configuration.GetSection("JwtSettings");
+var jwtSecretKey = jwtSection["SecretKey"]
+    ?? throw new InvalidOperationException("JwtSettings:SecretKey must be configured.");
+var jwtIssuer = jwtSection["Issuer"] ?? "PerformanceReviewApi";
+var jwtAudience = jwtSection["Audience"] ?? "PerformanceReviewClient";
 
 // ── Services ──────────────────────────────────────────────────────────────────
 builder.Services.AddControllers()
@@ -31,6 +39,25 @@ builder.Services.AddScoped<IEmployeeRepository, EmployeeRepository>();
 builder.Services.AddScoped<IReviewSessionRepository, ReviewSessionRepository>();
 builder.Services.AddScoped<IUserRepository, UserRepository>();
 builder.Services.AddValidatorsFromAssemblyContaining<SubmitReviewRequestValidator>();
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.MapInboundClaims = false;
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateIssuerSigningKey = true,
+            ValidateLifetime = true,
+            ValidIssuer = jwtIssuer,
+            ValidAudience = jwtAudience,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecretKey)),
+            NameClaimType = "unique_name",
+            RoleClaimType = "role",
+            ClockSkew = TimeSpan.Zero,
+        };
+    });
+builder.Services.AddAuthorization();
 
 builder.Services.AddCors(options =>
 {
@@ -47,6 +74,7 @@ app.UseSwagger();
 app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "Performance Review API v1"));
 
 app.UseCors();
+app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 

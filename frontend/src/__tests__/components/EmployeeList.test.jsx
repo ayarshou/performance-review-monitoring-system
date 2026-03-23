@@ -1,7 +1,11 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import MockAdapter from 'axios-mock-adapter'
 import EmployeeList from '../../components/EmployeeList'
+import apiClient from '../../api/client'
+
+const mock = new MockAdapter(apiClient)
 
 const mockEmployees = [
   { id: 1, name: 'Alice Johnson', email: 'alice.johnson@company.com', position: 'Engineering Manager', hireDate: '2020-01-01T00:00:00Z', managerId: null, subordinates: [], reviewSessions: [] },
@@ -9,18 +13,19 @@ const mockEmployees = [
 ]
 
 beforeEach(() => {
+  mock.reset()
   vi.restoreAllMocks()
 })
 
 describe('EmployeeList', () => {
   it('shows loading state while fetching', () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: () => new Promise(() => {}) })
+    mock.onGet('/api/employees').reply(() => new Promise(() => {}))
     render(<EmployeeList />)
     expect(screen.getByText(/loading/i)).toBeInTheDocument()
   })
 
   it('displays employees from the API', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(mockEmployees) })
+    mock.onGet('/api/employees').reply(200, mockEmployees)
     render(<EmployeeList />)
 
     await waitFor(() => expect(screen.getByText('Alice Johnson')).toBeInTheDocument())
@@ -29,28 +34,27 @@ describe('EmployeeList', () => {
   })
 
   it('shows employee management heading and add-employee form', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve([]) })
+    mock.onGet('/api/employees').reply(200, [])
     render(<EmployeeList />)
     expect(screen.getByRole('heading', { name: /add employee/i })).toBeInTheDocument()
   })
 
   it('shows empty state when no employees returned', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve([]) })
+    mock.onGet('/api/employees').reply(200, [])
     render(<EmployeeList />)
     await waitFor(() => expect(screen.getByText(/no employees found/i)).toBeInTheDocument())
   })
 
   it('shows error message when API returns non-OK status', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: false, status: 503 })
+    mock.onGet('/api/employees').reply(503)
     render(<EmployeeList />)
     await waitFor(() => expect(screen.getByText(/HTTP 503/i)).toBeInTheDocument())
   })
 
   it('calls DELETE endpoint when Delete button is clicked and confirmed', async () => {
-    global.fetch = vi.fn()
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(mockEmployees) }) // initial load
-      .mockResolvedValueOnce({ ok: true })                                              // DELETE
-      .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([mockEmployees[1]]) }) // reload
+    mock.onGet('/api/employees').replyOnce(200, mockEmployees)
+    mock.onDelete('/api/employees/1').replyOnce(200)
+    mock.onGet('/api/employees').replyOnce(200, [mockEmployees[1]])
 
     vi.stubGlobal('confirm', () => true)
 
@@ -61,8 +65,7 @@ describe('EmployeeList', () => {
     await user.click(screen.getAllByRole('button', { name: /delete/i })[0])
 
     await waitFor(() => {
-      const calls = global.fetch.mock.calls
-      expect(calls.some(([url, opts]) => opts?.method === 'DELETE' && url.includes('/api/employees/'))).toBe(true)
+      expect(mock.history.delete.some((request) => request.url?.includes('/api/employees/1'))).toBe(true)
     })
   })
 })

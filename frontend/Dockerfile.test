@@ -8,4 +8,4 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 COPY . .
-CMD ["npm", "test"]
+CMD ["sh", "-c", "npm test; status=$?; if [ $status -ne 0 ]; then exit $status; fi; sleep 5"]

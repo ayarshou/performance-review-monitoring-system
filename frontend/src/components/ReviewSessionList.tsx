@@ -1,3 +1,4 @@
+import axios from 'axios'
 import { useState, useEffect } from 'react'
 import type { ReviewSession, ReviewStatus } from '../types'
 import apiClient from '../api/client'
@@ -23,8 +24,14 @@ export default function ReviewSessionList() {
       const { data } = await apiClient.get<ReviewSession[]>(API)
       setSessions(data)
       setError(null)
-    } catch {
-      setError('Failed to load review sessions.')
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response) {
+        setError(`HTTP ${error.response.status}`)
+      } else if (error instanceof Error) {
+        setError(error.message)
+      } else {
+        setError('Failed to load review sessions.')
+      }
     } finally {
       setLoading(false)
     }
