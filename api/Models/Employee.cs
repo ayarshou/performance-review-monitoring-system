@@ -1,3 +1,6 @@
+using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
+
 namespace PerformanceReviewApi.Models;
 
 public class Employee
@@ -7,6 +10,13 @@ public class Employee
     public string Email { get; set; } = string.Empty;
     public string Position { get; set; } = string.Empty;
     public DateTime HireDate { get; set; }
+
+    [MaxLength(50)]
+    public string? Username { get; set; }
+
+    /// <summary>Stored as PBKDF2-SHA256 salt:hash. Never serialised to JSON.</summary>
+    [JsonIgnore]
+    public string? PasswordHash { get; set; }
 
     /// <summary>
     /// Foreign key to the Manager (also an Employee). Null for top-level employees.

@@ -42,11 +42,19 @@ app.UseCors();
 app.UseAuthorization();
 app.MapControllers();
 
-// Apply pending EF Core migrations automatically on startup
+// Apply pending EF Core migrations and seed test data on startup
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    db.Database.Migrate();
+    // InMemory provider (used in tests) does not support Migrate(); use EnsureCreated() instead
+    if (db.Database.IsRelational())
+        db.Database.Migrate();
+    else
+        db.Database.EnsureCreated();
+    DbSeeder.Seed(db);
 }
 
 app.Run();
+
+// Expose Program for WebApplicationFactory in integration tests
+public partial class Program {}

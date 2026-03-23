@@ -130,3 +130,120 @@ form .full-width {
 
 .error-msg { color: #e53e3e; font-size: 0.85rem; }
 .loading-msg { color: #718096; }
+
+/* ── Header layout ─────────────────────────────────────────────────────────── */
+.header-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.user-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-size: 0.9rem;
+}
+
+.user-bar button {
+  background: rgba(255,255,255,0.15);
+  border: 1px solid rgba(255,255,255,0.5);
+  color: white;
+  padding: 0.25rem 0.8rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.user-bar button:hover { background: rgba(255,255,255,0.3); }
+
+/* ── Login page ─────────────────────────────────────────────────────────────── */
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 3rem 1rem;
+  background: #f0f2f5;
+}
+
+.login-card {
+  background: white;
+  border-radius: 10px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.12);
+  padding: 2rem;
+  width: 100%;
+  max-width: 860px;
+}
+
+.login-card h1 {
+  font-size: 1.4rem;
+  color: #2b6cb0;
+  margin-bottom: 0.25rem;
+}
+
+.login-card h2 {
+  font-size: 1.1rem;
+  margin-bottom: 1.25rem;
+  color: #4a5568;
+}
+
+.login-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.login-error {
+  grid-column: 1 / -1;
+  color: #e53e3e;
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.login-btn {
+  grid-column: 1 / -1;
+  padding: 0.6rem;
+  background: #2b6cb0;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 1rem;
+}
+
+.login-btn:hover:not(:disabled) { background: #2c5282; }
+.login-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.login-hint {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 1rem;
+}
+
+.login-hint p {
+  font-size: 0.875rem;
+  margin-bottom: 0.75rem;
+  color: #4a5568;
+}
+
+.login-hint code {
+  background: #edf2f7;
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  font-size: 0.85rem;
+}
+
+.quick-login-btn {
+  padding: 0.15rem 0.55rem;
+  font-size: 0.75rem;
+  background: #ebf8ff;
+  color: #2b6cb0;
+  border: 1px solid #bee3f8;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.quick-login-btn:hover { background: #bee3f8; }
