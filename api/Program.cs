@@ -42,6 +42,9 @@ app.UseCors();
 app.UseAuthorization();
 app.MapControllers();
 
+// Lightweight liveness probe used by the Docker healthcheck
+app.MapGet("/health", () => Results.Ok(new { status = "healthy" }))
+   .AllowAnonymous();
 // Apply pending EF Core migrations and seed test data on startup
 using (var scope = app.Services.CreateScope())
 {

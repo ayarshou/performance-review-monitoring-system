@@ -226,47 +226,36 @@ npm run dev          # Vite dev server on http://localhost:5173
 
 Both test suites have dedicated Dockerfiles so you can run them with nothing but Docker installed.
 
-#### Run backend tests (xUnit)
+#### Run both suites together (recommended)
 
 ```bash
-docker build -f api.Tests/Dockerfile -t prms-api-tests .
+docker compose -f docker-compose.test.yml up --build --abort-on-container-exit
+```
+
+Exit code `0` means all tests passed. No SQL Server, Nginx, or local tooling needed — the backend uses an in-memory database.
+
+#### Run backend tests only (xUnit + Moq)
+
+```bash
+docker build -f tests/PerformanceReviewApi.Tests/Dockerfile -t prms-api-tests .
 docker run --rm prms-api-tests
 ```
 
-#### Run frontend tests (Vitest)
+#### Run frontend tests only (Vitest)
 
 ```bash
 docker build -f frontend/Dockerfile.test -t prms-frontend-tests frontend
 docker run --rm prms-frontend-tests
 ```
 
-#### Run both with Docker Compose
-
-```bash
-docker compose -f docker-compose.test.yml up --build --abort-on-container-exit
-```
-
-Exit code `0` means all tests passed. The test compose file spins up only the two test containers — no SQL Server or Nginx needed.
-
 ---
 
-### Backend tests
+### Backend tests (run locally without Docker)
 
-The backend test project lives in `api.Tests/` and uses **xUnit** with the **EF Core InMemory** provider, so no database is required.
-
-#### Test categories
-
-| Category | Location | What's covered |
-|----------|----------|----------------|
-| Unit — `PasswordHelper` | `api.Tests/Helpers/` | Hash format, uniqueness, verify correct/wrong/malformed |
-| Unit — Controllers | `api.Tests/Controllers/` | All CRUD happy-paths, 404, 400, mismatch ID |
-| Unit — `DbSeeder` | `api.Tests/Data/` | Employee + session counts, idempotency, password hashing |
-| Integration | `api.Tests/Integration/` | Full HTTP pipeline via `WebApplicationFactory`, seeded data |
-
-#### Run backend tests
+The backend test project is in `tests/PerformanceReviewApi.Tests/` and uses **xUnit + Moq** with the **EF Core InMemory** provider — no database required.
 
 ```bash
-cd api.Tests
+cd tests/PerformanceReviewApi.Tests
 dotnet test
 ```
 
@@ -280,11 +269,26 @@ With coverage (requires `coverlet.collector`):
 dotnet test --collect:"XPlat Code Coverage"
 ```
 
+#### Test categories
+
+| Category | Location | What's covered |
+|----------|----------|----------------|
+| Unit — `ReviewSchedulerService` | `Services/` | Email dispatch, deadline logic, idempotency |
+| Integration | `Integration/` | Full HTTP pipeline via `WebApplicationFactory`, seeded in-memory data |
+
 ---
 
-### Frontend tests
+### Frontend tests (run locally without Docker)
 
 The frontend uses **Vitest** + **React Testing Library** + **jsdom** — no browser required.
+
+```bash
+cd frontend
+npm install          # first time only
+npm test             # single run (CI-friendly, matches Docker behaviour)
+npm run test:watch   # interactive watch mode
+npm run test:coverage
+```
 
 #### Test categories
 
@@ -300,9 +304,9 @@ The frontend uses **Vitest** + **React Testing Library** + **jsdom** — no brow
 
 ```bash
 cd frontend
-npm install          # first time only — installs vitest and Testing Library
-npm test             # interactive watch mode
-npm run test:run     # single run (CI-friendly)
+npm install          # first time only
+npm test             # single run (CI-friendly, matches Docker behaviour)
+npm run test:watch   # interactive watch mode
 npm run test:coverage
 ```
 

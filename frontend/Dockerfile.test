@@ -1,14 +1,11 @@
 # Build and run the Vitest test suite.
 # Context is the frontend/ directory.
-#
-#   docker build -f frontend/Dockerfile.test -t prms-frontend-tests frontend
-#   docker run --rm prms-frontend-tests
 
-FROM node:22-alpine AS test
+FROM node:22-slim AS test
 WORKDIR /app
 
-COPY package.json package-lock.json* ./
-RUN npm config set strict-ssl false && npm install
+COPY package.json package-lock.json ./
+RUN npm ci
 
 COPY . .
-CMD ["npm", "run", "test:run"]
+CMD ["npm", "test"]

@@ -1,11 +1,11 @@
 services:
 
-  # ── Backend xUnit tests ───────────────────────────────────────────────────────
+  # ── Backend xUnit + Moq tests (no SQL Server needed — uses in-memory DB) ──────
   api-tests:
     build:
       context: .
-      dockerfile: api.Tests/Dockerfile
-    # Non-zero exit code propagates to the compose run exit code
+      dockerfile: tests/PerformanceReviewApi.Tests/Dockerfile
+    # Non-zero exit code propagates the failure to the compose run exit code
     # so CI can detect failures.
 
   # ── Frontend Vitest tests ─────────────────────────────────────────────────────
