@@ -1,0 +1,15 @@
+services:
+
+  # ── Backend xUnit tests ───────────────────────────────────────────────────────
+  api-tests:
+    build:
+      context: .
+      dockerfile: api.Tests/Dockerfile
+    # Non-zero exit code propagates to the compose run exit code
+    # so CI can detect failures.
+
+  # ── Frontend Vitest tests ─────────────────────────────────────────────────────
+  frontend-tests:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.test

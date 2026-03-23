@@ -220,6 +220,34 @@ npm run dev          # Vite dev server on http://localhost:5173
 
 ## Testing
 
+### Run all tests in Docker (no local SDK or Node required)
+
+Both test suites have dedicated Dockerfiles so you can run them with nothing but Docker installed.
+
+#### Run backend tests (xUnit)
+
+```bash
+docker build -f api.Tests/Dockerfile -t prms-api-tests .
+docker run --rm prms-api-tests
+```
+
+#### Run frontend tests (Vitest)
+
+```bash
+docker build -f frontend/Dockerfile.test -t prms-frontend-tests frontend
+docker run --rm prms-frontend-tests
+```
+
+#### Run both with Docker Compose
+
+```bash
+docker compose -f docker-compose.test.yml up --build --abort-on-container-exit
+```
+
+Exit code `0` means all tests passed. The test compose file spins up only the two test containers — no SQL Server or Nginx needed.
+
+---
+
 ### Backend tests
 
 The backend test project lives in `api.Tests/` and uses **xUnit** with the **EF Core InMemory** provider, so no database is required.
