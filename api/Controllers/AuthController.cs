@@ -19,8 +19,10 @@ public class AuthController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.Password))
             return BadRequest(new { message = "Username and password are required." });
 
+        var normalizedUsername = request.Username.Trim().ToLowerInvariant();
+
         var employee = await _db.Employees
-            .FirstOrDefaultAsync(e => e.Username == request.Username.Trim().ToLower());
+            .FirstOrDefaultAsync(e => e.Username.ToLower() == normalizedUsername);
 
         if (employee?.PasswordHash is null || !PasswordHelper.Verify(request.Password, employee.PasswordHash))
             return Unauthorized(new { message = "Invalid username or password." });
