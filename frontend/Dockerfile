@@ -3,7 +3,8 @@ FROM node:22-alpine AS build
 WORKDIR /app
 
 COPY package.json package-lock.json* ./
-RUN npm config set strict-ssl false && npm install
+ARG NPM_STRICT_SSL=true
+RUN if [ "$NPM_STRICT_SSL" = "false" ]; then npm config set strict-ssl false; fi && npm install
 
 COPY . .
 RUN npm run build
