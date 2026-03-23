@@ -1,7 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using PerformanceReviewApi.Data;
 using PerformanceReviewApi.Models;
+using PerformanceReviewApi.Repositories;
 
 namespace PerformanceReviewApi.Controllers;
 
@@ -9,30 +8,20 @@ namespace PerformanceReviewApi.Controllers;
 [Route("api/[controller]")]
 public class EmployeesController : ControllerBase
 {
-    private readonly AppDbContext _db;
+    private readonly IEmployeeRepository _repo;
 
-    public EmployeesController(AppDbContext db) => _db = db;
+    public EmployeesController(IEmployeeRepository repo) => _repo = repo;
 
     // GET /api/employees
     [HttpGet]
-    public async Task<ActionResult<IEnumerable<Employee>>> GetAll()
-    {
-        return await _db.Employees
-            .Include(e => e.Manager)
-            .Include(e => e.Subordinates)
-            .ToListAsync();
-    }
+    public async Task<ActionResult<IEnumerable<Employee>>> GetAll() =>
+        Ok(await _repo.GetAllAsync());
 
     // GET /api/employees/{id}
     [HttpGet("{id:int}")]
     public async Task<ActionResult<Employee>> GetById(int id)
     {
-        var employee = await _db.Employees
-            .Include(e => e.Manager)
-            .Include(e => e.Subordinates)
-            .Include(e => e.ReviewSessions)
-            .FirstOrDefaultAsync(e => e.Id == id);
-
+        var employee = await _repo.GetByIdAsync(id);
         return employee is null ? NotFound() : Ok(employee);
     }
 
@@ -40,9 +29,8 @@ public class EmployeesController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<Employee>> Create(Employee employee)
     {
-        _db.Employees.Add(employee);
-        await _db.SaveChangesAsync();
-        return CreatedAtAction(nameof(GetById), new { id = employee.Id }, employee);
+        var created = await _repo.CreateAsync(employee);
+        return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
     // PUT /api/employees/{id}
@@ -50,31 +38,15 @@ public class EmployeesController : ControllerBase
     public async Task<IActionResult> Update(int id, Employee employee)
     {
         if (id != employee.Id) return BadRequest();
-
-        _db.Entry(employee).State = EntityState.Modified;
-
-        try
-        {
-            await _db.SaveChangesAsync();
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            if (!await _db.Employees.AnyAsync(e => e.Id == id)) return NotFound();
-            throw;
-        }
-
-        return NoContent();
+        var updated = await _repo.UpdateAsync(employee);
+        return updated ? NoContent() : NotFound();
     }
 
     // DELETE /api/employees/{id}
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id)
     {
-        var employee = await _db.Employees.FindAsync(id);
-        if (employee is null) return NotFound();
-
-        _db.Employees.Remove(employee);
-        await _db.SaveChangesAsync();
-        return NoContent();
+        var deleted = await _repo.DeleteAsync(id);
+        return deleted ? NoContent() : NotFound();
     }
 }

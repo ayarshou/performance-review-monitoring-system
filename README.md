@@ -9,10 +9,12 @@ A full-stack application for managing employee performance reviews, built with *
 ```
 .
 ├── api/                        # .NET 8 Web API
-│   ├── Controllers/            # REST endpoints
+│   ├── Controllers/            # REST endpoints (thin; delegate to repositories)
 │   ├── Data/                   # AppDbContext (EF Core)
 │   ├── Migrations/             # EF Core migrations
 │   ├── Models/                 # POCO classes & enums
+│   ├── Repositories/           # IEmployeeRepository, IReviewSessionRepository + implementations
+│   ├── Services/               # IEmailService (MailKit) + ReviewSchedulerService (BackgroundService)
 │   ├── appsettings.json
 │   ├── Dockerfile
 │   └── PerformanceReviewApi.csproj
@@ -24,6 +26,8 @@ A full-stack application for managing employee performance reviews, built with *
 │   ├── Dockerfile
 │   ├── nginx.conf
 │   └── package.json
+├── tests/
+│   └── PerformanceReviewApi.Tests/   # xUnit + Moq unit tests
 ├── docker-compose.yml
 └── README.md
 ```
