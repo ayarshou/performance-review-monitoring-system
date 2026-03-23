@@ -15,4 +15,10 @@ public interface IEmployeeRepository
     Task<bool> DeleteAsync(int id);
 
     Task<bool> ExistsAsync(int id);
+
+    /// <summary>
+    /// Returns the direct subordinates of <paramref name="managerId"/>
+    /// with their ReviewSessions eagerly loaded.
+    /// </summary>
+    Task<IEnumerable<Employee>> GetSubordinatesWithReviewsAsync(int managerId);
 }

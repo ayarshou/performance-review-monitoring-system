@@ -9,6 +9,7 @@ public class AppDbContext : DbContext
 
     public DbSet<Employee> Employees => Set<Employee>();
     public DbSet<ReviewSession> ReviewSessions => Set<ReviewSession>();
+    public DbSet<User> Users => Set<User>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -62,6 +63,35 @@ public class AppDbContext : DbContext
                   .WithMany(e => e.ReviewSessions)
                   .HasForeignKey(rs => rs.EmployeeId)
                   .OnDelete(DeleteBehavior.Cascade);
+
+            entity.Property(rs => rs.Notes)
+                  .HasMaxLength(2000);
+        });
+
+        // ── User ────────────────────────────────────────────────────────────────
+        modelBuilder.Entity<User>(entity =>
+        {
+            entity.HasKey(u => u.Id);
+
+            entity.Property(u => u.Username)
+                  .IsRequired()
+                  .HasMaxLength(100);
+
+            entity.HasIndex(u => u.Username)
+                  .IsUnique();
+
+            entity.Property(u => u.PasswordHash)
+                  .IsRequired();
+
+            entity.Property(u => u.Role)
+                  .IsRequired()
+                  .HasMaxLength(50);
+
+            entity.HasOne(u => u.Employee)
+                  .WithMany()
+                  .HasForeignKey(u => u.EmployeeId)
+                  .OnDelete(DeleteBehavior.SetNull)
+                  .IsRequired(false);
         });
     }
 }
