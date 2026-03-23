@@ -8,11 +8,8 @@ public class ReviewSession
     public DateTime ScheduledDate { get; set; }
     public DateTime Deadline { get; set; }
 
-    /// <summary>
-    /// Optional notes or feedback submitted when completing a review.
-    /// </summary>
     public string? Notes { get; set; }
 
-    // Navigation property
-    public Employee Employee { get; set; } = null!;
+    // Navigation property — nullable so model binding doesn't treat it as required
+    public Employee? Employee { get; set; }
 }

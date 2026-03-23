@@ -82,7 +82,7 @@ public class ReviewSchedulerService : BackgroundService
 
         foreach (var session in pendingSessions)
         {
-            var employee = session.Employee;
+            var employee = session.Employee!;
             var subject = "Performance Review Reminder";
             var body =
                 $"Hi {employee.Name},\n\n" +
@@ -115,15 +115,15 @@ public class ReviewSchedulerService : BackgroundService
 
         // Group by manager (sessions for employees without a manager are skipped)
         var byManager = sessionList
-            .Where(rs => rs.Employee.Manager is not null)
-            .GroupBy(rs => rs.Employee.Manager!);
+            .Where(rs => rs.Employee!.Manager is not null)
+            .GroupBy(rs => rs.Employee!.Manager!);
 
         foreach (var group in byManager)
         {
             var manager = group.Key;
             var lines = group
                 .Select(rs =>
-                    $"  - {rs.Employee.Name} (deadline: {rs.Deadline:MMMM dd, yyyy})")
+                    $"  - {rs.Employee!.Name} (deadline: {rs.Deadline:MMMM dd, yyyy})")
                 .ToList();
 
             var subject = "Overdue Review Summary for Your Team";

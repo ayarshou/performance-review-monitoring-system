@@ -1,15 +1,18 @@
-using System.Text;
 using FluentValidation;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
-using Microsoft.OpenApi.Models;
 using PerformanceReviewApi.Data;
-using PerformanceReviewApi.Middleware;
 using PerformanceReviewApi.Repositories;
-using PerformanceReviewApi.Services;
+using PerformanceReviewApi.Validators;
+using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
+var jwtSection = builder.Configuration.GetSection("JwtSettings");
+var jwtSecretKey = jwtSection["SecretKey"]
+    ?? throw new InvalidOperationException("JwtSettings:SecretKey must be configured.");
+var jwtIssuer = jwtSection["Issuer"] ?? "PerformanceReviewApi";
+var jwtAudience = jwtSection["Audience"] ?? "PerformanceReviewClient";
 
 // ── Services ──────────────────────────────────────────────────────────────────
 builder.Services.AddControllers()
@@ -23,60 +26,10 @@ builder.Services.AddControllers()
             System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
     });
 
-// ── FluentValidation ──────────────────────────────────────────────────────────
-builder.Services.AddValidatorsFromAssemblyContaining<Program>();
-
-// ── JWT Authentication ────────────────────────────────────────────────────────
-var jwtSettings = builder.Configuration.GetSection("JwtSettings");
-var secretKey = jwtSettings["SecretKey"]
-    ?? throw new InvalidOperationException("JwtSettings:SecretKey is not configured.");
-
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
-    {
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuer = true,
-            ValidateAudience = true,
-            ValidateLifetime = true,
-            ValidateIssuerSigningKey = true,
-            ValidIssuer = jwtSettings["Issuer"],
-            ValidAudience = jwtSettings["Audience"],
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey))
-        };
-    });
-
-builder.Services.AddAuthorization();
-
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new() { Title = "Performance Review API", Version = "v1" });
-
-    // Add JWT auth to Swagger UI
-    c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
-    {
-        Description = "JWT Authorization header. Example: \"Bearer {token}\"",
-        Name = "Authorization",
-        In = ParameterLocation.Header,
-        Type = SecuritySchemeType.Http,
-        Scheme = "bearer",
-        BearerFormat = "JWT"
-    });
-    c.AddSecurityRequirement(new OpenApiSecurityRequirement
-    {
-        {
-            new OpenApiSecurityScheme
-            {
-                Reference = new OpenApiReference
-                {
-                    Type = ReferenceType.SecurityScheme,
-                    Id = "Bearer"
-                }
-            },
-            Array.Empty<string>()
-        }
-    });
 });
 
 builder.Services.AddDbContext<AppDbContext>(options =>
@@ -85,9 +38,26 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 builder.Services.AddScoped<IEmployeeRepository, EmployeeRepository>();
 builder.Services.AddScoped<IReviewSessionRepository, ReviewSessionRepository>();
 builder.Services.AddScoped<IUserRepository, UserRepository>();
-
-builder.Services.AddSingleton<IEmailService, EmailService>();
-builder.Services.AddHostedService<ReviewSchedulerService>();
+builder.Services.AddValidatorsFromAssemblyContaining<SubmitReviewRequestValidator>();
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.MapInboundClaims = false;
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = true,
+            ValidateAudience = true,
+            ValidateIssuerSigningKey = true,
+            ValidateLifetime = true,
+            ValidIssuer = jwtIssuer,
+            ValidAudience = jwtAudience,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecretKey)),
+            NameClaimType = "unique_name",
+            RoleClaimType = "role",
+            ClockSkew = TimeSpan.Zero,
+        };
+    });
+builder.Services.AddAuthorization();
 
 builder.Services.AddCors(options =>
 {
@@ -100,9 +70,6 @@ builder.Services.AddCors(options =>
 // ── Pipeline ──────────────────────────────────────────────────────────────────
 var app = builder.Build();
 
-// Global exception handling must be first in the pipeline
-app.UseMiddleware<GlobalExceptionMiddleware>();
-
 app.UseSwagger();
 app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "Performance Review API v1"));
 
@@ -111,16 +78,22 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 
-// Apply pending EF Core migrations automatically on startup (skipped for non-relational providers)
+// Lightweight liveness probe used by the Docker healthcheck
+app.MapGet("/health", () => Results.Ok(new { status = "healthy" }))
+   .AllowAnonymous();
+// Apply pending EF Core migrations and seed test data on startup
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    // InMemory provider (used in tests) does not support Migrate(); use EnsureCreated() instead
     if (db.Database.IsRelational())
         db.Database.Migrate();
+    else
+        db.Database.EnsureCreated();
+    DbSeeder.Seed(db);
 }
 
 app.Run();
 
-// Expose Program to the integration test project
-public partial class Program { }
-
+// Expose Program for WebApplicationFactory in integration tests
+public partial class Program {}

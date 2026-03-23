@@ -1,3 +1,4 @@
+import axios from 'axios'
 import { useState, useEffect } from 'react'
 import type { Employee } from '../types'
 import apiClient from '../api/client'
@@ -24,8 +25,14 @@ export default function EmployeeList() {
       const { data } = await apiClient.get<Employee[]>(API)
       setEmployees(data)
       setError(null)
-    } catch {
-      setError('Failed to load employees.')
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response) {
+        setError(`HTTP ${error.response.status}`)
+      } else if (error instanceof Error) {
+        setError(error.message)
+      } else {
+        setError('Failed to load employees.')
+      }
     } finally {
       setLoading(false)
     }

@@ -1,43 +1,15 @@
 # Performance Review Monitoring System
 
-A full-stack application for managing employee performance reviews, built with **.NET 8 Web API**, **React 18 + TypeScript (Vite)**, and **SQL Server**, fully containerised with Docker.
+A full-stack application for managing employee performance reviews. Employees and their hierarchical relationships are tracked, and review sessions with scheduled dates and statuses can be created and managed.
 
----
+## Tech Stack
 
-## Quick Start (Docker)
-
-> **Requires:** [Docker Desktop](https://www.docker.com/products/docker-desktop/) 24+ (includes Docker Compose v2).
-
-```bash
-# 1. Clone the repository
-git clone https://github.com/ayarshou/performance-review-monitoring-system.git
-cd performance-review-monitoring-system
-
-# 2. Build and start all three services (database, API, frontend)
-docker compose up --build
-```
-
-Once all containers are healthy, open your browser:
-
-| Service | URL |
-|---------|-----|
-| **Frontend** (React app) | <http://localhost:3000> |
-| **API** (Swagger UI) | <http://localhost:5000/swagger> |
-
-> The API waits for the database to be ready before starting.  
-> EF Core migrations run automatically on first boot — no manual setup needed.
-
-To run the stack **in the background** (detached mode):
-
-```bash
-docker compose up --build -d
-```
-
-To stop and remove all containers:
-
-```bash
-docker compose down
-```
+| Layer | Technology |
+|-------|-----------|
+| Backend API | .NET 8 Web API + Entity Framework Core |
+| Database | SQL Server 2022 |
+| Frontend | React 18 + TypeScript + Vite 6 + Tailwind CSS (served by Nginx in production) |
+| Containerisation | Docker + Docker Compose |
 
 ---
 
@@ -46,40 +18,138 @@ docker compose down
 ```
 .
 ├── api/                        # .NET 8 Web API
-│   ├── Controllers/            # REST endpoints (thin; delegate to repositories)
-│   ├── Data/                   # AppDbContext (EF Core)
-│   ├── Migrations/             # EF Core migrations
-│   ├── Models/                 # POCO classes & enums
-│   ├── Repositories/           # IEmployeeRepository, IReviewSessionRepository + implementations
-│   ├── Services/               # IEmailService (MailKit) + ReviewSchedulerService (BackgroundService)
+│   ├── Controllers/
+│   │   ├── AuthController.cs           # POST /api/auth/login (issues JWT)
+│   │   ├── EmployeesController.cs      # CRUD for employees
+│   │   ├── ReviewController.cs         # Submit review + manager team-status
+│   │   └── ReviewSessionsController.cs # CRUD for review sessions
+│   ├── Data/
+│   │   ├── AppDbContext.cs             # EF Core DB context
+│   │   └── DbSeeder.cs                # Initial seed data
+│   ├── DTOs/                           # Request/Response shapes
+│   ├── Helpers/
+│   │   ├── PasswordHashHelper.cs       # PBKDF2 hashing (Users table)
+│   │   └── PasswordHelper.cs           # PBKDF2 hashing (Employees table)
+│   ├── Middleware/
+│   │   └── GlobalExceptionMiddleware.cs
+│   ├── Migrations/                     # EF Core auto-migrations
+│   ├── Models/
+│   │   ├── Employee.cs                 # Employee entity
+│   │   ├── ReviewSession.cs            # ReviewSession entity
+│   │   ├── ReviewStatus.cs             # Pending | Completed enum
+│   │   └── User.cs                     # User entity (login credentials)
+│   ├── Repositories/                   # Data-access interfaces + implementations
+│   ├── Services/
+│   │   ├── EmailService.cs             # MailKit SMTP email sending
+│   │   └── ReviewSchedulerService.cs   # Background reminder scheduler
+│   ├── Validators/
+│   │   └── SubmitReviewRequestValidator.cs  # FluentValidation
 │   ├── appsettings.json
 │   ├── Dockerfile
+│   ├── Program.cs                      # DI, JWT auth, middleware, auto-migrate
 │   └── PerformanceReviewApi.csproj
-├── frontend/                   # React 18 + TypeScript + Vite SPA
+├── frontend/                   # React + TypeScript + Vite SPA
 │   ├── src/
-│   │   ├── __tests__/          # Vitest tests (LoginPage.test.tsx)
-│   │   ├── api/                # axios client (client.ts)
-│   │   ├── components/         # EmployeeList.tsx, ReviewSessionList.tsx
-│   │   ├── pages/              # LoginPage.tsx, EmployeeDashboard.tsx
-│   │   ├── types/              # Shared TypeScript types (index.ts)
-│   │   ├── App.tsx             # Root component – auth routing
-│   │   ├── main.tsx            # ReactDOM entry point
-│   │   ├── setupTests.ts       # Vitest global setup
-│   │   └── index.css           # Global styles (Tailwind + custom)
-│   ├── .env                    # VITE_API_URL (copy from .env.example)
-│   ├── .env.example            # Environment variable template
-│   ├── tailwind.config.js
-│   ├── postcss.config.js
-│   ├── tsconfig.json
-│   ├── vite.config.ts
+│   │   ├── api/
+│   │   │   └── client.ts               # axios instance with JWT interceptor
+│   │   ├── components/
+│   │   │   ├── EmployeeList.tsx
+│   │   │   ├── ReviewSessionList.tsx
+│   │   │   └── MyReviews.jsx
+│   │   ├── pages/
+│   │   │   ├── LoginPage.tsx
+│   │   │   ├── LoginPage.css
+│   │   │   └── EmployeeDashboard.tsx
+│   │   ├── types/
+│   │   │   └── index.ts                # Shared TypeScript interfaces
+│   │   ├── __tests__/                  # Vitest + React Testing Library tests
+│   │   ├── App.tsx
+│   │   ├── main.tsx
+│   │   └── index.css                   # Tailwind directives
 │   ├── Dockerfile
-│   ├── nginx.conf
-│   └── package.json
+│   ├── Dockerfile.test                 # Test runner image
+│   ├── nginx.conf                      # Nginx: serve SPA + proxy /api
+│   ├── package.json
+│   ├── tailwind.config.cjs
+│   ├── postcss.config.cjs
+│   ├── vite.config.ts
+│   └── tsconfig.json
+├── api.Tests/                  # Backend unit tests (xUnit + Moq)
 ├── tests/
-│   └── PerformanceReviewApi.Tests/   # xUnit + Moq unit & integration tests
-├── docker-compose.yml
+│   └── PerformanceReviewApi.Tests/     # Integration + scheduler tests
+├── docker-compose.yml                  # Full stack (db + api + frontend)
+├── docker-compose.test.yml             # Test runner (api-tests + frontend-tests)
+├── copilot-instructions.md
 └── README.md
 ```
+
+---
+
+## Data Model
+
+### Employee
+| Field | Type | Notes |
+|-------|------|-------|
+| `Id` | int | Primary key |
+| `Name` | string | |
+| `Email` | string | |
+| `Username` | string | Used for login (expected to be unique) |
+| `Position` | string | |
+| `HireDate` | DateTime | |
+| `ManagerId` | int? | Self-referencing FK (nullable for top-level) |
+| `PasswordHash` | string | Stored in DB only; never returned by the API |
+
+### ReviewSession
+| Field | Type | Notes |
+|-------|------|-------|
+| `Id` | int | Primary key |
+| `EmployeeId` | int | FK → Employee |
+| `Status` | enum | `Pending` \| `Completed` |
+| `ScheduledDate` | DateTime | |
+| `Deadline` | DateTime | |
+| `Notes` | string? | Optional notes when completing a review |
+
+### User
+| Field | Type | Notes |
+|-------|------|-------|
+| `Id` | int | Primary key |
+| `Username` | string | Unique login name |
+| `PasswordHash` | string | PBKDF2-SHA256 `salt:hash` – never returned by the API |
+| `Role` | string | `Manager` or `Employee` |
+| `EmployeeId` | int? | FK → Employee (nullable) |
+
+---
+
+## API Endpoints
+
+Base URL (Docker): `http://localhost:5000`  
+Swagger UI: `http://localhost:5000/swagger`
+
+### Authentication — `/api/auth`
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/auth/login` | Authenticate and receive a JWT token |
+
+The login endpoint accepts `{ "username": "...", "password": "..." }` and returns a JWT along with user profile data. Credentials are checked against the **Users** table first, then the **Employees** table as a fallback.
+
+### Employees — `/api/employees`
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/employees` | List all employees (with manager & subordinates) |
+| GET | `/api/employees/{id}` | Get employee by ID (includes review sessions) |
+| POST | `/api/employees` | Create a new employee |
+| PUT | `/api/employees/{id}` | Update an employee |
+| DELETE | `/api/employees/{id}` | Delete an employee |
+
+### Review Sessions — `/api/reviewsessions`
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/reviewsessions` | List all review sessions |
+| GET | `/api/reviewsessions/{id}` | Get session by ID |
+| GET | `/api/reviewsessions/employee/{employeeId}` | Get all sessions for an employee |
+| POST | `/api/reviewsessions` | Create a new review session |
+| PUT | `/api/reviewsessions/{id}` | Update a review session |
+| DELETE | `/api/reviewsessions/{id}` | Delete a review session |
 
 ---
 
@@ -92,7 +162,7 @@ docker compose down
 
 ---
 
-## Build & Run (Docker – recommended)
+## Build & Run with Docker (recommended)
 
 ### 1. Clone the repository
 ```bash
@@ -102,17 +172,19 @@ cd performance-review-monitoring-system
 
 ### 2. Start the entire stack
 ```bash
-# Foreground (logs stream to the terminal)
 docker compose up --build
-
-# Detached / background mode
-docker compose up --build -d
 ```
 
-This command will:
-- Pull the **SQL Server 2022** image and initialise the database
-- Build and start the **.NET 8 API** (auto-runs EF Core migrations on first boot)
-- Build and compile the **React + TypeScript frontend** and serve it via Nginx
+This single command will:
+1. Pull the **SQL Server 2022** image and start the database
+2. Build and start the **.NET 8 API** — EF Core migrations run automatically on first boot
+3. Build and start the **React frontend** behind Nginx, with `/api` requests proxied to the backend
+
+Logs from all three services will appear in the same terminal. Wait until you see output similar to:
+```
+api-1       | Now listening on: http://[::]:8080
+frontend-1  | nginx: [notice] start worker processes
+```
 
 ### 3. Open the application
 
@@ -127,91 +199,171 @@ This command will:
 docker compose down
 ```
 
-To also remove the database volume:
+To also remove the persistent database volume:
 ```bash
 docker compose down -v
 ```
 
-### 5. Rebuild a single service
+### Run in detached mode (background)
 ```bash
-# Rebuild only the frontend image
-docker compose build frontend
-
-# Rebuild only the API image
-docker compose build api
+docker compose up --build -d
+docker compose logs -f          # stream logs afterwards
+docker compose down             # stop when done
 ```
 
-### 6. View logs
-```bash
-# All services
-docker compose logs -f
+---
 
-# Single service
-docker compose logs -f api
-docker compose logs -f frontend
-```
+## Configuration
+
+Environment variables are set in `docker-compose.yml`. The key ones are:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SA_PASSWORD` | `YourStrong@Passw0rd` | SQL Server SA password |
+| `ConnectionStrings__DefaultConnection` | *(set in compose)* | Full ADO.NET connection string used by the API |
+| `ASPNETCORE_ENVIRONMENT` | `Production` | ASP.NET Core environment |
+
+To use a different SA password, update it in both the `db` and `api` service sections of `docker-compose.yml`.
 
 ---
 
 ## Run Locally (without Docker)
 
+### Prerequisites
+- [.NET 8 SDK](https://dotnet.microsoft.com/download)
+- [Node.js 22+](https://nodejs.org)
+- A local SQL Server instance
+
 ### API
 ```bash
 cd api
 dotnet restore
-# Point to a local SQL Server instance in appsettings.Development.json
+# Update the connection string in appsettings.Development.json to point at your local SQL Server
 dotnet ef database update      # apply migrations
-dotnet run
-# API is available at http://localhost:5000
+dotnet run                     # listens on http://localhost:5000
 ```
 
 ### Frontend
 ```bash
 cd frontend
-cp .env.example .env           # configure VITE_API_URL if needed
 npm install
-npm run dev                    # starts Vite dev server on http://localhost:5173
+npm run dev          # Vite dev server on http://localhost:5173
 ```
 
-> **Note:** `vite.config.ts` proxies `/api` requests to `http://localhost:5000` in dev mode.
+> **Important:** `vite.config.js` proxies `/api` to `http://api:8080`, which only resolves inside Docker.  
+> For local development, change the proxy `target` to `http://localhost:5000`:
+> ```js
+> proxy: {
+>   '/api': {
+>     target: 'http://localhost:5000',
+>     changeOrigin: true,
+>   },
+> },
+> ```
 
 ---
 
-## Frontend Development
+## Troubleshooting
 
-### Available scripts
+| Symptom | Likely cause | Fix |
+|---------|-------------|-----|
+| API exits immediately with a connection error | SQL Server is still starting up | The `healthcheck` in `docker-compose.yml` retries 10×; wait a few seconds and check `docker compose logs db` |
+| `npm run build` fails with "Cannot find module" | Missing `node_modules` | Run `npm install` inside `frontend/` before building |
+| Port 3000 or 5000 already in use | Another process is using the port | Change the host-side port in `docker-compose.yml` (e.g. `"3001:80"`) |
+| SQL Server container crashes on Apple Silicon / ARM | Image may not support ARM | Use `mcr.microsoft.com/azure-sql-edge` as the `db` image instead |
+| Frontend shows blank page after reload | SPA routing | Nginx's `try_files $uri $uri/ /index.html` already handles this; hard-refresh with Ctrl+Shift+R |
 
-```bash
-# Start Vite dev server (hot reload)
-npm run dev
+---
 
-# Production build
-npm run build
+## Testing
 
-# Preview the production build locally
-npm run preview
+### Run all tests in Docker (no local SDK or Node required)
 
-# Run Vitest tests (single run)
-npm test
+Both test suites have dedicated Dockerfiles so you can run them with nothing but Docker installed.
 
-# Run Vitest in watch mode
-npm run test:watch
-
-# Type-check without building
-npm run type-check
-```
-
-### Environment variables
-
-Copy `.env.example` to `.env` and set the values:
+#### Run both suites together (recommended)
 
 ```bash
-cp frontend/.env.example frontend/.env
+docker compose -f docker-compose.test.yml up --build --abort-on-container-exit
 ```
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `VITE_API_URL` | *(empty)* | Full API base URL. Leave empty to use Vite/Nginx proxy. Set to `http://localhost:5000` for direct access without a proxy. |
+Exit code `0` means all tests passed. No SQL Server, Nginx, or local tooling needed — the backend uses an in-memory database.
+
+#### Run backend tests only (xUnit + Moq)
+
+```bash
+docker build -f tests/PerformanceReviewApi.Tests/Dockerfile -t prms-api-tests .
+docker run --rm prms-api-tests
+```
+
+#### Run frontend tests only (Vitest)
+
+```bash
+docker build -f frontend/Dockerfile.test -t prms-frontend-tests frontend
+docker run --rm prms-frontend-tests
+```
+
+---
+
+### Backend tests (run locally without Docker)
+
+The backend test project is in `tests/PerformanceReviewApi.Tests/` and uses **xUnit + Moq** with the **EF Core InMemory** provider — no database required.
+
+```bash
+cd tests/PerformanceReviewApi.Tests
+dotnet test
+```
+
+With detailed output:
+```bash
+dotnet test --logger "console;verbosity=detailed"
+```
+
+With coverage (requires `coverlet.collector`):
+```bash
+dotnet test --collect:"XPlat Code Coverage"
+```
+
+#### Test categories
+
+| Category | Location | What's covered |
+|----------|----------|----------------|
+| Unit — `ReviewSchedulerService` | `Services/` | Email dispatch, deadline logic, idempotency |
+| Integration | `Integration/` | Full HTTP pipeline via `WebApplicationFactory`, seeded in-memory data |
+
+---
+
+### Frontend tests (run locally without Docker)
+
+The frontend uses **Vitest** + **React Testing Library** + **jsdom** — no browser required.
+
+```bash
+cd frontend
+npm install          # first time only
+npm test             # single run (CI-friendly, matches Docker behaviour)
+npm run test:watch   # interactive watch mode
+npm run test:coverage
+```
+
+#### Test categories
+
+| Test file | What's covered |
+|-----------|----------------|
+| `App.test.jsx` | Shows Login when unauthenticated; shows nav after login; Sign Out flow; tab switching |
+| `Login.test.jsx` | Form render; demo-user table (13 rows); quick-fill; submit body; onLogin callback; error states |
+| `MyReviews.test.jsx` | Profile display; correct fetch endpoint; session table; empty/error states |
+| `EmployeeList.test.jsx` | Loading state; employee table render; empty state; error state; DELETE call |
+| `ReviewSessionList.test.jsx` | Loading state; session table; badge CSS classes; empty/error states; DELETE call |
+
+#### Run frontend tests
+
+```bash
+cd frontend
+npm install          # first time only
+npm test             # single run (CI-friendly, matches Docker behaviour)
+npm run test:watch   # interactive watch mode
+npm run test:coverage
+```
 
 ---
 
@@ -232,29 +384,13 @@ dotnet ef migrations remove
 
 ---
 
-## Running Tests
+## API Endpoints (quick reference)
 
-### Backend (xUnit + Moq)
-```bash
-cd tests/PerformanceReviewApi.Tests
-dotnet test
-```
-
-### Frontend (Vitest + Testing Library)
-```bash
-cd frontend
-npm test
-```
-
----
-
-## API Endpoints
-
-### Authentication
+### Authentication  `POST /api/auth/login`
 
 | Method | Route | Description |
 |--------|-------|-------------|
-| POST | `/api/auth/login` | Authenticate and receive a JWT token |
+| POST | `/api/auth/login` | Authenticate and receive a JWT |
 
 ### Employees  `GET|POST /api/employees`  ·  `GET|PUT|DELETE /api/employees/{id}`
 
@@ -277,13 +413,6 @@ npm test
 | PUT | `/api/reviewsessions/{id}` | Update a session |
 | DELETE | `/api/reviewsessions/{id}` | Delete a session |
 
-### Reviews  *(requires JWT)*
-
-| Method | Route | Description |
-|--------|-------|-------------|
-| POST | `/api/reviews/{id}/submit` | Complete a review session (add notes) |
-| GET | `/api/reviews/team-status` | Manager: view all subordinate review statuses |
-
 ---
 
 ## Database Schema
@@ -294,8 +423,10 @@ Employee
 Id           INT IDENTITY PK
 Name         NVARCHAR(100) NOT NULL
 Email        NVARCHAR(200) NOT NULL
+Username     NVARCHAR(50)  NULL      (unique, used for login)
 Position     NVARCHAR(100) NOT NULL
 HireDate     DATETIME2     NOT NULL
+PasswordHash NVARCHAR(MAX) NULL      (PBKDF2-SHA256, never returned by API)
 ManagerId    INT           NULL  →  FK → Employee(Id)   [self-ref, RESTRICT]
 
 ReviewSession
@@ -310,32 +441,27 @@ Notes          NVARCHAR(MAX) NULL
 User
 ────────────────────────────────────────
 Id             INT IDENTITY PK
-Username       NVARCHAR(100) NOT NULL  [unique]
-PasswordHash   NVARCHAR(MAX) NOT NULL  (PBKDF2: salt:hash)
+Username       NVARCHAR(200) NOT NULL  (unique)
+PasswordHash   NVARCHAR(MAX) NOT NULL  (PBKDF2-SHA256)
 Role           NVARCHAR(50)  NOT NULL  (Manager | Employee)
-EmployeeId     INT           NULL  →  FK → Employee(Id)  [SetNull]
+EmployeeId     INT           NULL  →  FK → Employee(Id)
 ```
 
 **Relationships**
 
 - `Employee.ManagerId → Employee.Id`: self-referencing one-to-many — one Manager has many Subordinates.
 - `ReviewSession.EmployeeId → Employee.Id`: one Employee has many ReviewSessions.
-- `User.EmployeeId → Employee.Id`: optional link between a login account and an employee record.
+- `User.EmployeeId → Employee.Id`: optional link between login user and employee record.
 
 ---
 
 ## Environment Variables
 
-### API (set via `docker-compose.yml` or shell environment)
+The API reads its connection string from the environment:
 
-| Variable | Example | Description |
-|----------|---------|-------------|
-| `ConnectionStrings__DefaultConnection` | `Server=db;Database=...` | SQL Server connection string |
-| `ASPNETCORE_ENVIRONMENT` | `Production` | ASP.NET Core environment |
-| `JwtSettings__SecretKey` | *see appsettings.json* | JWT signing secret (replace in production) |
+```
+ConnectionStrings__DefaultConnection=Server=db;Database=PerformanceReviewDb;...
+```
 
-### Frontend (set in `frontend/.env`)
+This is set automatically by `docker-compose.yml`. Override it in your own environment or a `.env` file for custom deployments.
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `VITE_API_URL` | *(empty)* | API base URL; empty = use proxy |

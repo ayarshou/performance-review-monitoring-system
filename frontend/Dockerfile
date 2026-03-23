@@ -1,9 +1,10 @@
 # ── Stage 1: build ────────────────────────────────────────────────────────────
-FROM node:22-alpine AS build
+# node:22-slim (Debian-based) avoids Alpine-specific npm "Exit handler" bugs
+FROM node:22-slim AS build
 WORKDIR /app
 
-COPY package.json package-lock.json* ./
-RUN npm install
+COPY package.json package-lock.json ./
+RUN npm ci
 
 COPY . .
 RUN npm run build

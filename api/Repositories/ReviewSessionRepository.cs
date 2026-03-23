@@ -65,7 +65,7 @@ public class ReviewSessionRepository : IReviewSessionRepository
     public async Task<IEnumerable<ReviewSession>> GetPendingNearDeadlineAsync(DateTime deadlineCutoff) =>
         await _db.ReviewSessions
             .Include(rs => rs.Employee)
-                .ThenInclude(e => e.Manager)
+                .ThenInclude(e => e!.Manager)
             .Where(rs =>
                 rs.Status == ReviewStatus.Pending &&
                 rs.Deadline.Date <= deadlineCutoff)
