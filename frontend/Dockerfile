@@ -2,9 +2,10 @@
 FROM node:22-alpine AS build
 WORKDIR /app
 
-COPY package.json package-lock.json* ./
+COPY package.json package-lock.json ./
 ARG NPM_STRICT_SSL=true
-RUN if [ "$NPM_STRICT_SSL" = "false" ]; then npm config set strict-ssl false; fi && npm install
+RUN if [ "$NPM_STRICT_SSL" = "false" ]; then npm config set strict-ssl false; fi && \
+    NODE_OPTIONS="--max-old-space-size=512" npm ci --prefer-offline
 
 COPY . .
 RUN npm run build
