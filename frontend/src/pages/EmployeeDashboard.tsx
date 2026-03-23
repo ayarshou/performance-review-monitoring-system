@@ -53,9 +53,10 @@ export default function EmployeeDashboard({ employeeId, employeeName, onLogout }
       (a, b) => new Date(a.scheduledDate).getTime() - new Date(b.scheduledDate).getTime()
     )[0]
 
+  const MS_PER_DAY = 24 * 60 * 60 * 1000
   const reviewIsDue =
     pendingSessions.length > 0 &&
-    pendingSessions.some((s) => new Date(s.deadline) <= new Date(Date.now() + 30 * 86400_000))
+    pendingSessions.some((s) => new Date(s.deadline) <= new Date(Date.now() + 30 * MS_PER_DAY))
 
   const dueSession = reviewIsDue
     ? pendingSessions.sort(
