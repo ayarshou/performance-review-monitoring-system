@@ -1,9 +1,8 @@
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Moq;
-using PerformanceReviewApi.Data;
 using PerformanceReviewApi.Models;
+using PerformanceReviewApi.Repositories;
 using PerformanceReviewApi.Services;
 
 namespace PerformanceReviewApi.Tests.Services;
@@ -22,12 +21,11 @@ internal sealed class FixedTimeProvider : TimeProvider
 /// <summary>
 /// Unit tests for <see cref="ReviewSchedulerService"/>.
 ///
-/// Uses the EF Core InMemory provider to avoid a real database and Moq to assert
-/// on email delivery without a real SMTP server.
-/// All tests operate against a fixed date (2026-03-15) to eliminate
-/// month-boundary flakiness.
+/// Uses Moq to mock <see cref="IReviewSessionRepository"/> and <see cref="IEmailService"/>
+/// so no real database or SMTP server is required.
+/// All tests operate against a fixed date (2026-03-15) to eliminate month-boundary flakiness.
 /// </summary>
-public class ReviewSchedulerServiceTests : IDisposable
+public class ReviewSchedulerServiceTests
 {
     // ── Fixed clock: mid-March 2026 ───────────────────────────────────────────
     private static readonly DateTimeOffset FixedNow = new DateTimeOffset(2026, 3, 15, 12, 0, 0, TimeSpan.Zero);
@@ -36,37 +34,41 @@ public class ReviewSchedulerServiceTests : IDisposable
     // Convenience date helpers aligned to the fixed clock
     private static DateTime ThisMonthDeadline => new DateTime(2026, 3, 20, 0, 0, 0, DateTimeKind.Utc);
     private static DateTime NextMonthDeadline => new DateTime(2026, 4, 20, 0, 0, 0, DateTimeKind.Utc);
-    private static DateTime WithinThreeDays    => new DateTime(2026, 3, 17, 0, 0, 0, DateTimeKind.Utc); // today + 2
+    private static DateTime WithinThreeDays   => new DateTime(2026, 3, 17, 0, 0, 0, DateTimeKind.Utc); // today + 2
     private static DateTime BeyondThreeDays   => new DateTime(2026, 3, 25, 0, 0, 0, DateTimeKind.Utc); // today + 10
 
     // ── Shared mocks ──────────────────────────────────────────────────────────
     private readonly Mock<IEmailService> _emailMock = new();
     private readonly Mock<ILogger<ReviewSchedulerService>> _loggerMock = new();
     private readonly Mock<IServiceScopeFactory> _scopeFactoryMock = new();
-
-    private AppDbContext CreateInMemoryDbContext(string dbName)
-    {
-        var options = new DbContextOptionsBuilder<AppDbContext>()
-            .UseInMemoryDatabase(databaseName: dbName)
-            .Options;
-        return new AppDbContext(options);
-    }
+    private readonly Mock<IReviewSessionRepository> _reviewRepoMock = new();
 
     private ReviewSchedulerService CreateService() =>
         new ReviewSchedulerService(_scopeFactoryMock.Object, _emailMock.Object, _loggerMock.Object, Clock);
 
-    public void Dispose() { /* in-memory DBs are isolated per test via unique names */ }
-
-    // ── Helper: wire scope factory so RunScheduledChecksAsync uses our DbContext ──
-    private void SetupScopeFactory(AppDbContext db)
+    // ── Helper: wire scope factory to resolve the mocked repository ──────────
+    private void SetupScopeFactory()
     {
         var scopeMock = new Mock<IServiceScope>();
         var providerMock = new Mock<IServiceProvider>();
 
-        providerMock.Setup(p => p.GetService(typeof(AppDbContext))).Returns(db);
+        providerMock
+            .Setup(p => p.GetService(typeof(IReviewSessionRepository)))
+            .Returns(_reviewRepoMock.Object);
         scopeMock.Setup(s => s.ServiceProvider).Returns(providerMock.Object);
         _scopeFactoryMock.Setup(f => f.CreateScope()).Returns(scopeMock.Object);
     }
+
+    // ── Helper: build a ReviewSession with an eagerly-loaded Employee ─────────
+    private static ReviewSession MakeSession(Employee employee, DateTime deadline, ReviewStatus status = ReviewStatus.Pending) =>
+        new ReviewSession
+        {
+            EmployeeId = employee.Id,
+            Employee = employee,
+            Status = status,
+            ScheduledDate = deadline.AddDays(-10),
+            Deadline = deadline
+        };
 
     // ═════════════════════════════════════════════════════════════════════════
     // SendMonthlyReviewNotificationsAsync
@@ -76,89 +78,97 @@ public class ReviewSchedulerServiceTests : IDisposable
     public async Task SendMonthlyReviewNotifications_SendsEmail_OnlyToPendingEmployees()
     {
         // Arrange ────────────────────────────────────────────────────────────
-        var db = CreateInMemoryDbContext(nameof(SendMonthlyReviewNotifications_SendsEmail_OnlyToPendingEmployees));
-
         var alice = new Employee { Id = 1, Name = "Alice", Email = "alice@example.com", Position = "Dev", HireDate = FixedNow.UtcDateTime.AddYears(-1) };
-        var bob   = new Employee { Id = 2, Name = "Bob",   Email = "bob@example.com",   Position = "Dev", HireDate = FixedNow.UtcDateTime.AddYears(-1) };
 
-        db.Employees.AddRange(alice, bob);
-        db.ReviewSessions.AddRange(
-            new ReviewSession { EmployeeId = 1, Status = ReviewStatus.Pending,   ScheduledDate = ThisMonthDeadline.AddDays(-5), Deadline = ThisMonthDeadline },
-            new ReviewSession { EmployeeId = 2, Status = ReviewStatus.Completed, ScheduledDate = ThisMonthDeadline.AddDays(-5), Deadline = ThisMonthDeadline }
-        );
-        await db.SaveChangesAsync();
+        // The repository already filters by Pending; only Alice's session is returned.
+        _reviewRepoMock
+            .Setup(r => r.GetPendingDueInRangeAsync(It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(new[] { MakeSession(alice, ThisMonthDeadline) });
 
         var service = CreateService();
 
         // Act ────────────────────────────────────────────────────────────────
-        await service.SendMonthlyReviewNotificationsAsync(db);
+        await service.SendMonthlyReviewNotificationsAsync(_reviewRepoMock.Object);
 
         // Assert ─────────────────────────────────────────────────────────────
-        // Alice (Pending) receives exactly one email; Bob (Completed) receives none.
         _emailMock.Verify(
             e => e.SendEmailAsync("alice@example.com", "Alice", It.IsAny<string>(), It.IsAny<string>()),
             Times.Once,
-            "A pending employee must receive a reminder email.");
+            "An email must be sent for each session returned by the repository.");
 
+        // Verify no extra emails were sent
         _emailMock.Verify(
-            e => e.SendEmailAsync("bob@example.com", It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()),
-            Times.Never,
-            "A completed employee must not receive any email.");
+            e => e.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()),
+            Times.Once,
+            "Exactly one email must be sent when the repository returns one session.");
     }
 
     [Fact]
-    public async Task SendMonthlyReviewNotifications_SendsNoEmail_WhenNoSessionsDueThisMonth()
+    public async Task SendMonthlyReviewNotifications_SendsNoEmail_WhenRepositoryReturnsEmpty()
     {
         // Arrange ────────────────────────────────────────────────────────────
-        var db = CreateInMemoryDbContext(nameof(SendMonthlyReviewNotifications_SendsNoEmail_WhenNoSessionsDueThisMonth));
-
-        var employee = new Employee { Id = 1, Name = "Carol", Email = "carol@example.com", Position = "QA", HireDate = FixedNow.UtcDateTime.AddYears(-1) };
-        db.Employees.Add(employee);
-
-        // Deadline is next month ─ must NOT trigger this month's notification pass
-        db.ReviewSessions.Add(new ReviewSession
-        {
-            EmployeeId = 1,
-            Status = ReviewStatus.Pending,
-            ScheduledDate = NextMonthDeadline.AddDays(-5),
-            Deadline = NextMonthDeadline
-        });
-        await db.SaveChangesAsync();
+        _reviewRepoMock
+            .Setup(r => r.GetPendingDueInRangeAsync(It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(Enumerable.Empty<ReviewSession>());
 
         var service = CreateService();
 
         // Act ────────────────────────────────────────────────────────────────
-        await service.SendMonthlyReviewNotificationsAsync(db);
+        await service.SendMonthlyReviewNotificationsAsync(_reviewRepoMock.Object);
 
         // Assert ─────────────────────────────────────────────────────────────
         _emailMock.Verify(
             e => e.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()),
-            Times.Never);
+            Times.Never,
+            "No email must be sent when there are no pending sessions this month.");
+    }
+
+    [Fact]
+    public async Task SendMonthlyReviewNotifications_PassesCorrectDateRange_ToRepository()
+    {
+        // Arrange ────────────────────────────────────────────────────────────
+        // Fixed clock is 2026-03-15 → expected range: [2026-03-01, 2026-04-01)
+        var expectedFrom = new DateTime(2026, 3, 1, 0, 0, 0, DateTimeKind.Utc);
+        var expectedTo   = new DateTime(2026, 4, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        _reviewRepoMock
+            .Setup(r => r.GetPendingDueInRangeAsync(expectedFrom, expectedTo))
+            .ReturnsAsync(Enumerable.Empty<ReviewSession>())
+            .Verifiable("Repository must be queried with the correct month boundaries.");
+
+        var service = CreateService();
+
+        // Act ────────────────────────────────────────────────────────────────
+        await service.SendMonthlyReviewNotificationsAsync(_reviewRepoMock.Object);
+
+        // Assert ─────────────────────────────────────────────────────────────
+        _reviewRepoMock.Verify();
     }
 
     [Fact]
     public async Task SendMonthlyReviewNotifications_SendsEmail_ToEveryPendingEmployee()
     {
         // Arrange ────────────────────────────────────────────────────────────
-        var db = CreateInMemoryDbContext(nameof(SendMonthlyReviewNotifications_SendsEmail_ToEveryPendingEmployee));
+        var sessions = Enumerable.Range(1, 3)
+            .Select(i => MakeSession(
+                new Employee { Id = i, Name = $"Emp{i}", Email = $"emp{i}@example.com", Position = "Dev", HireDate = FixedNow.UtcDateTime.AddYears(-1) },
+                ThisMonthDeadline))
+            .ToArray();
 
-        for (int i = 1; i <= 3; i++)
-        {
-            db.Employees.Add(new Employee { Id = i, Name = $"Employee{i}", Email = $"emp{i}@example.com", Position = "Dev", HireDate = FixedNow.UtcDateTime.AddYears(-1) });
-            db.ReviewSessions.Add(new ReviewSession { EmployeeId = i, Status = ReviewStatus.Pending, ScheduledDate = ThisMonthDeadline.AddDays(-5), Deadline = ThisMonthDeadline });
-        }
-        await db.SaveChangesAsync();
+        _reviewRepoMock
+            .Setup(r => r.GetPendingDueInRangeAsync(It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(sessions);
 
         var service = CreateService();
 
         // Act ────────────────────────────────────────────────────────────────
-        await service.SendMonthlyReviewNotificationsAsync(db);
+        await service.SendMonthlyReviewNotificationsAsync(_reviewRepoMock.Object);
 
         // Assert ─────────────────────────────────────────────────────────────
         _emailMock.Verify(
             e => e.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()),
             Times.Exactly(3),
-            "Each of the three pending employees must receive one email.");
+            "Each of the three pending sessions must trigger one email.");
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -169,25 +179,17 @@ public class ReviewSchedulerServiceTests : IDisposable
     public async Task SendManagerSummaries_SendsSummary_WhenOverdueReviewsExistInTeam()
     {
         // Arrange ────────────────────────────────────────────────────────────
-        var db = CreateInMemoryDbContext(nameof(SendManagerSummaries_SendsSummary_WhenOverdueReviewsExistInTeam));
-
         var manager = new Employee { Id = 1, Name = "Manager Mike", Email = "mike@example.com", Position = "Manager", HireDate = FixedNow.UtcDateTime.AddYears(-3) };
-        var report  = new Employee { Id = 2, Name = "Report Rita",  Email = "rita@example.com", Position = "Dev",     HireDate = FixedNow.UtcDateTime.AddYears(-1), ManagerId = 1 };
+        var report  = new Employee { Id = 2, Name = "Report Rita",  Email = "rita@example.com", Position = "Dev",     HireDate = FixedNow.UtcDateTime.AddYears(-1), ManagerId = 1, Manager = manager };
 
-        db.Employees.AddRange(manager, report);
-        db.ReviewSessions.Add(new ReviewSession
-        {
-            EmployeeId = 2,
-            Status = ReviewStatus.Pending,
-            ScheduledDate = WithinThreeDays.AddDays(-10),
-            Deadline = WithinThreeDays
-        });
-        await db.SaveChangesAsync();
+        _reviewRepoMock
+            .Setup(r => r.GetPendingNearDeadlineAsync(It.IsAny<DateTime>()))
+            .ReturnsAsync(new[] { MakeSession(report, WithinThreeDays) });
 
         var service = CreateService();
 
         // Act ────────────────────────────────────────────────────────────────
-        await service.SendManagerSummariesAsync(db);
+        await service.SendManagerSummariesAsync(_reviewRepoMock.Object);
 
         // Assert ─────────────────────────────────────────────────────────────
         _emailMock.Verify(
@@ -197,95 +199,70 @@ public class ReviewSchedulerServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task SendManagerSummaries_DoesNotSendSummary_WhenNoOverdueReviewsExist()
+    public async Task SendManagerSummaries_DoesNotSendSummary_WhenRepositoryReturnsEmpty()
     {
         // Arrange ────────────────────────────────────────────────────────────
-        var db = CreateInMemoryDbContext(nameof(SendManagerSummaries_DoesNotSendSummary_WhenNoOverdueReviewsExist));
-
-        var manager = new Employee { Id = 1, Name = "Manager Sam", Email = "sam@example.com", Position = "Manager", HireDate = FixedNow.UtcDateTime.AddYears(-3) };
-        var report  = new Employee { Id = 2, Name = "Report Dan",  Email = "dan@example.com", Position = "Dev",     HireDate = FixedNow.UtcDateTime.AddYears(-1), ManagerId = 1 };
-
-        db.Employees.AddRange(manager, report);
-
-        // Deadline well beyond the 3-day window
-        db.ReviewSessions.Add(new ReviewSession
-        {
-            EmployeeId = 2,
-            Status = ReviewStatus.Pending,
-            ScheduledDate = BeyondThreeDays.AddDays(-10),
-            Deadline = BeyondThreeDays
-        });
-        await db.SaveChangesAsync();
+        _reviewRepoMock
+            .Setup(r => r.GetPendingNearDeadlineAsync(It.IsAny<DateTime>()))
+            .ReturnsAsync(Enumerable.Empty<ReviewSession>());
 
         var service = CreateService();
 
         // Act ────────────────────────────────────────────────────────────────
-        await service.SendManagerSummariesAsync(db);
+        await service.SendManagerSummariesAsync(_reviewRepoMock.Object);
 
         // Assert ─────────────────────────────────────────────────────────────
         _emailMock.Verify(
             e => e.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()),
             Times.Never,
-            "No summary must be sent when no reviews are approaching the 3-day deadline.");
+            "No summary must be sent when the repository returns no overdue sessions.");
     }
 
     [Fact]
-    public async Task SendManagerSummaries_DoesNotSendSummary_WhenAllReviewsAreCompleted()
+    public async Task SendManagerSummaries_DoesNotSendToManager_WhenEmployeeHasNoManager()
     {
         // Arrange ────────────────────────────────────────────────────────────
-        var db = CreateInMemoryDbContext(nameof(SendManagerSummaries_DoesNotSendSummary_WhenAllReviewsAreCompleted));
+        // Top-level employee (no manager)
+        var employee = new Employee { Id = 1, Name = "Solo Sue", Email = "sue@example.com", Position = "CTO", HireDate = FixedNow.UtcDateTime.AddYears(-5) };
 
-        var manager = new Employee { Id = 1, Name = "Manager Eve",  Email = "eve@example.com",   Position = "Manager", HireDate = FixedNow.UtcDateTime.AddYears(-3) };
-        var report  = new Employee { Id = 2, Name = "Report Frank", Email = "frank@example.com", Position = "Dev",     HireDate = FixedNow.UtcDateTime.AddYears(-1), ManagerId = 1 };
-
-        db.Employees.AddRange(manager, report);
-
-        // Deadline within 3 days but status is Completed
-        db.ReviewSessions.Add(new ReviewSession
-        {
-            EmployeeId = 2,
-            Status = ReviewStatus.Completed,
-            ScheduledDate = WithinThreeDays.AddDays(-10),
-            Deadline = WithinThreeDays
-        });
-        await db.SaveChangesAsync();
+        _reviewRepoMock
+            .Setup(r => r.GetPendingNearDeadlineAsync(It.IsAny<DateTime>()))
+            .ReturnsAsync(new[] { MakeSession(employee, WithinThreeDays) });
 
         var service = CreateService();
 
         // Act ────────────────────────────────────────────────────────────────
-        await service.SendManagerSummariesAsync(db);
+        await service.SendManagerSummariesAsync(_reviewRepoMock.Object);
 
         // Assert ─────────────────────────────────────────────────────────────
         _emailMock.Verify(
             e => e.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()),
             Times.Never,
-            "Completed reviews must not trigger a manager summary.");
+            "No email should be sent when the overdue employee has no manager.");
     }
 
     [Fact]
     public async Task SendManagerSummaries_SendsOneSummaryPerManager_ForMultipleReports()
     {
         // Arrange ────────────────────────────────────────────────────────────
-        var db = CreateInMemoryDbContext(nameof(SendManagerSummaries_SendsOneSummaryPerManager_ForMultipleReports));
-
         var manager = new Employee { Id = 1, Name = "Manager Leo", Email = "leo@example.com", Position = "Manager", HireDate = FixedNow.UtcDateTime.AddYears(-3) };
-        var r1      = new Employee { Id = 2, Name = "Report One",  Email = "one@example.com",  Position = "Dev", HireDate = FixedNow.UtcDateTime.AddYears(-1), ManagerId = 1 };
-        var r2      = new Employee { Id = 3, Name = "Report Two",  Email = "two@example.com",  Position = "Dev", HireDate = FixedNow.UtcDateTime.AddYears(-1), ManagerId = 1 };
+        var r1      = new Employee { Id = 2, Name = "Report One",  Email = "one@example.com",  Position = "Dev", HireDate = FixedNow.UtcDateTime.AddYears(-1), ManagerId = 1, Manager = manager };
+        var r2      = new Employee { Id = 3, Name = "Report Two",  Email = "two@example.com",  Position = "Dev", HireDate = FixedNow.UtcDateTime.AddYears(-1), ManagerId = 1, Manager = manager };
 
-        db.Employees.AddRange(manager, r1, r2);
-        db.ReviewSessions.AddRange(
-            new ReviewSession { EmployeeId = 2, Status = ReviewStatus.Pending, ScheduledDate = WithinThreeDays.AddDays(-10), Deadline = WithinThreeDays },
-            new ReviewSession { EmployeeId = 3, Status = ReviewStatus.Pending, ScheduledDate = WithinThreeDays.AddDays(-10), Deadline = WithinThreeDays }
-        );
-        await db.SaveChangesAsync();
+        _reviewRepoMock
+            .Setup(r => r.GetPendingNearDeadlineAsync(It.IsAny<DateTime>()))
+            .ReturnsAsync(new[]
+            {
+                MakeSession(r1, WithinThreeDays),
+                MakeSession(r2, WithinThreeDays)
+            });
 
         var service = CreateService();
 
         // Act ────────────────────────────────────────────────────────────────
-        await service.SendManagerSummariesAsync(db);
+        await service.SendManagerSummariesAsync(_reviewRepoMock.Object);
 
         // Assert ─────────────────────────────────────────────────────────────
-        // Manager receives exactly ONE consolidated email even though two reports are overdue
         _emailMock.Verify(
             e => e.SendEmailAsync("leo@example.com", "Manager Leo", It.IsAny<string>(), It.IsAny<string>()),
             Times.Once,
@@ -293,34 +270,24 @@ public class ReviewSchedulerServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task SendManagerSummaries_DoesNotSendToManager_WhenEmployeeHasNoManager()
+    public async Task SendManagerSummaries_PassesCorrectCutoffDate_ToRepository()
     {
         // Arrange ────────────────────────────────────────────────────────────
-        var db = CreateInMemoryDbContext(nameof(SendManagerSummaries_DoesNotSendToManager_WhenEmployeeHasNoManager));
+        // Fixed clock is 2026-03-15 → today.Date is 2026-03-15 → cutoff is 2026-03-18
+        var expectedCutoff = new DateTime(2026, 3, 18, 0, 0, 0, DateTimeKind.Utc);
 
-        // Top-level employee (no manager)
-        var employee = new Employee { Id = 1, Name = "Solo Sue", Email = "sue@example.com", Position = "CTO", HireDate = FixedNow.UtcDateTime.AddYears(-5) };
-        db.Employees.Add(employee);
-
-        db.ReviewSessions.Add(new ReviewSession
-        {
-            EmployeeId = 1,
-            Status = ReviewStatus.Pending,
-            ScheduledDate = WithinThreeDays.AddDays(-10),
-            Deadline = WithinThreeDays
-        });
-        await db.SaveChangesAsync();
+        _reviewRepoMock
+            .Setup(r => r.GetPendingNearDeadlineAsync(expectedCutoff))
+            .ReturnsAsync(Enumerable.Empty<ReviewSession>())
+            .Verifiable("Repository must be queried with today + 3 days as the cutoff.");
 
         var service = CreateService();
 
         // Act ────────────────────────────────────────────────────────────────
-        await service.SendManagerSummariesAsync(db);
+        await service.SendManagerSummariesAsync(_reviewRepoMock.Object);
 
         // Assert ─────────────────────────────────────────────────────────────
-        _emailMock.Verify(
-            e => e.SendEmailAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()),
-            Times.Never,
-            "No email should be sent when the overdue employee has no manager.");
+        _reviewRepoMock.Verify();
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -355,19 +322,26 @@ public class ReviewSchedulerServiceTests : IDisposable
     }
 
     // ═════════════════════════════════════════════════════════════════════════
-    // RunScheduledChecksAsync (integration of both passes via scope)
+    // RunScheduledChecksAsync — scope + repository resolution
     // ═════════════════════════════════════════════════════════════════════════
 
     [Fact]
-    public async Task RunScheduledChecks_UsesNewScope_ForDbContext()
+    public async Task RunScheduledChecks_CreatesNewScope_AndResolvesRepository()
     {
         // Arrange ────────────────────────────────────────────────────────────
-        var db = CreateInMemoryDbContext(nameof(RunScheduledChecks_UsesNewScope_ForDbContext));
-        SetupScopeFactory(db);
+        SetupScopeFactory();
+
+        // Stub both repository calls to return empty so the service completes cleanly.
+        _reviewRepoMock
+            .Setup(r => r.GetPendingDueInRangeAsync(It.IsAny<DateTime>(), It.IsAny<DateTime>()))
+            .ReturnsAsync(Enumerable.Empty<ReviewSession>());
+        _reviewRepoMock
+            .Setup(r => r.GetPendingNearDeadlineAsync(It.IsAny<DateTime>()))
+            .ReturnsAsync(Enumerable.Empty<ReviewSession>());
 
         var service = CreateService();
 
-        // Act ─ should complete without exception even with an empty database
+        // Act ────────────────────────────────────────────────────────────────
         await service.RunScheduledChecksAsync();
 
         // Assert ─────────────────────────────────────────────────────────────

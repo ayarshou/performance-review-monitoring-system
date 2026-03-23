@@ -1,6 +1,4 @@
-using Microsoft.EntityFrameworkCore;
-using PerformanceReviewApi.Data;
-using PerformanceReviewApi.Models;
+using PerformanceReviewApi.Repositories;
 
 namespace PerformanceReviewApi.Services;
 
@@ -53,39 +51,34 @@ public class ReviewSchedulerService : BackgroundService
     }
 
     /// <summary>
-    /// Core logic: creates an EF scope and runs both notification passes.
+    /// Core logic: creates a DI scope, resolves <see cref="IReviewSessionRepository"/>,
+    /// and runs both notification passes.
     /// Exposed as public so unit tests can invoke it directly.
     /// </summary>
     public async Task RunScheduledChecksAsync()
     {
         using var scope = _scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var reviewRepo = scope.ServiceProvider.GetRequiredService<IReviewSessionRepository>();
 
-        await SendMonthlyReviewNotificationsAsync(db);
-        await SendManagerSummariesAsync(db);
+        await SendMonthlyReviewNotificationsAsync(reviewRepo);
+        await SendManagerSummariesAsync(reviewRepo);
     }
 
     /// <summary>
     /// Finds employees with a Pending review session whose deadline falls in the
     /// current calendar month and sends each one an email reminder.
     /// </summary>
-    public async Task SendMonthlyReviewNotificationsAsync(AppDbContext db)
+    public async Task SendMonthlyReviewNotificationsAsync(IReviewSessionRepository reviewRepo)
     {
         var today = _timeProvider.GetUtcNow().UtcDateTime;
         var monthStart = new DateTime(today.Year, today.Month, 1, 0, 0, 0, DateTimeKind.Utc);
         var monthEnd = monthStart.AddMonths(1);
 
-        var pendingSessions = await db.ReviewSessions
-            .Include(rs => rs.Employee)
-            .Where(rs =>
-                rs.Status == ReviewStatus.Pending &&
-                rs.Deadline >= monthStart &&
-                rs.Deadline < monthEnd)
-            .ToListAsync();
+        var pendingSessions = await reviewRepo.GetPendingDueInRangeAsync(monthStart, monthEnd);
 
         _logger.LogInformation(
             "Found {Count} pending review(s) due this month.",
-            pendingSessions.Count);
+            pendingSessions.Count());
 
         foreach (var session in pendingSessions)
         {
@@ -106,27 +99,22 @@ public class ReviewSchedulerService : BackgroundService
     /// Finds Pending review sessions whose deadline is within the next 3 days,
     /// groups them by manager, and sends each manager a summary email.
     /// </summary>
-    public async Task SendManagerSummariesAsync(AppDbContext db)
+    public async Task SendManagerSummariesAsync(IReviewSessionRepository reviewRepo)
     {
         var today = _timeProvider.GetUtcNow().UtcDateTime.Date;
         var deadlineCutoff = today.AddDays(3);
 
-        var overdueSessions = await db.ReviewSessions
-            .Include(rs => rs.Employee)
-                .ThenInclude(e => e.Manager)
-            .Where(rs =>
-                rs.Status == ReviewStatus.Pending &&
-                rs.Deadline.Date <= deadlineCutoff)
-            .ToListAsync();
+        var overdueSessions = await reviewRepo.GetPendingNearDeadlineAsync(deadlineCutoff);
 
-        if (overdueSessions.Count == 0)
+        var sessionList = overdueSessions.ToList();
+        if (sessionList.Count == 0)
         {
             _logger.LogInformation("No overdue sessions found; skipping manager summaries.");
             return;
         }
 
         // Group by manager (sessions for employees without a manager are skipped)
-        var byManager = overdueSessions
+        var byManager = sessionList
             .Where(rs => rs.Employee.Manager is not null)
             .GroupBy(rs => rs.Employee.Manager!);
 
