@@ -96,6 +96,38 @@ Swagger UI: `http://localhost:5000/swagger`
 | PUT | `/api/reviewsessions/{id}` | Update a review session |
 | DELETE | `/api/reviewsessions/{id}` | Delete a review session |
 
+### Auth — `/api/auth`
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/auth/login` | Authenticate an employee and return their profile |
+
+**Request body** (`POST /api/auth/login`):
+```json
+{
+  "username": "jsmith",
+  "password": "secret"
+}
+```
+
+**Success response** (`200 OK`):
+```json
+{
+  "id": 1,
+  "name": "Jane Smith",
+  "email": "jsmith@example.com",
+  "position": "Engineer",
+  "managerId": null
+}
+```
+
+> `PasswordHash` is **never** included in any API response.
+
+**Error responses:**
+| Status | Body | Condition |
+|--------|------|-----------|
+| `400 Bad Request` | `{ "message": "Username and password are required." }` | Missing or blank fields |
+| `401 Unauthorized` | `{ "message": "Invalid username or password." }` | Wrong credentials |
+
 ---
 
 ## Prerequisites
@@ -347,6 +379,39 @@ dotnet ef migrations remove
 | POST | `/api/reviewsessions` | Schedule a review session |
 | PUT | `/api/reviewsessions/{id}` | Update a session |
 | DELETE | `/api/reviewsessions/{id}` | Delete a session |
+
+### Auth  `POST /api/auth/login`
+
+| Method | Route | Description |
+|--------|-------|-------------|
+| POST | `/api/auth/login` | Authenticate an employee and return their profile |
+
+**Request body:**
+```json
+{
+  "username": "jsmith",
+  "password": "secret"
+}
+```
+
+**Success response** (`200 OK`):
+```json
+{
+  "id": 1,
+  "name": "Jane Smith",
+  "email": "jsmith@example.com",
+  "position": "Engineer",
+  "managerId": null
+}
+```
+
+> `PasswordHash` is **never** included in any API response.
+
+**Error responses:**
+| Status | Body | Condition |
+|--------|------|-----------|
+| `400 Bad Request` | `{ "message": "Username and password are required." }` | Missing or blank fields |
+| `401 Unauthorized` | `{ "message": "Invalid username or password." }` | Wrong credentials |
 
 ---
 
