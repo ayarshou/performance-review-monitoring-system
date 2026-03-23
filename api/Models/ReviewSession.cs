@@ -8,6 +8,6 @@ public class ReviewSession
     public DateTime ScheduledDate { get; set; }
     public DateTime Deadline { get; set; }
 
-    // Navigation property
-    public Employee Employee { get; set; } = null!;
+    // Navigation property — nullable so model binding doesn't treat it as required
+    public Employee? Employee { get; set; }
 }

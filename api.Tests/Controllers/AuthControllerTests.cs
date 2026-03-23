@@ -31,7 +31,7 @@ public class AuthControllerTests
         var ok = Assert.IsType<OkObjectResult>(result);
         var json = System.Text.Json.JsonSerializer.Serialize(ok.Value);
         Assert.Contains("\"name\"", json);
-        Assert.Contains("Alice", json);
+        Assert.Contains("Test User", json); // SeedEmployee sets Name = "Test User"
     }
 
     [Fact]

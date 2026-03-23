@@ -43,8 +43,9 @@ describe('ReviewSessionList', () => {
     global.fetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(mockSessions) })
     render(<ReviewSessionList />)
 
-    await waitFor(() => expect(screen.getByText('Pending')).toBeInTheDocument())
-    expect(screen.getByText('Completed')).toBeInTheDocument()
+    // Use selector:'span' to avoid matching the <select> options in the form
+    await waitFor(() => expect(screen.getByText('Pending', { selector: 'span' })).toBeInTheDocument())
+    expect(screen.getByText('Completed', { selector: 'span' })).toBeInTheDocument()
   })
 
   it('applies correct badge CSS classes for statuses', async () => {
@@ -52,8 +53,9 @@ describe('ReviewSessionList', () => {
     render(<ReviewSessionList />)
 
     await waitFor(() => {
-      const pendingBadge   = screen.getByText('Pending')
-      const completedBadge = screen.getByText('Completed')
+      // Use selector:'span' to target the badge spans, not the <select> options
+      const pendingBadge   = screen.getByText('Pending', { selector: 'span' })
+      const completedBadge = screen.getByText('Completed', { selector: 'span' })
       expect(pendingBadge).toHaveClass('badge-pending')
       expect(completedBadge).toHaveClass('badge-completed')
     })

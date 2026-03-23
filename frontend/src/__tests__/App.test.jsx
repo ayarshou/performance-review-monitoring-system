@@ -29,8 +29,11 @@ describe('App', () => {
     await user.type(screen.getByPlaceholderText(/Review2026!/i), 'Review2026!')
     await user.click(screen.getByRole('button', { name: /^sign in$/i }))
 
-    await waitFor(() => expect(screen.getByText('Alice Johnson')).toBeInTheDocument())
-    expect(screen.getByRole('button', { name: /sign out/i })).toBeInTheDocument()
+    // Wait for the Sign Out button — unique to the authenticated view (not on login page)
+    await waitFor(() => expect(screen.getByRole('button', { name: /sign out/i })).toBeInTheDocument())
+    // Name appears in both the header <strong> and the MyReviews profile table;
+    // use selector to target the header element specifically
+    expect(screen.getByText('Alice Johnson', { selector: 'strong' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /my reviews/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /employees/i })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: /all review sessions/i })).toBeInTheDocument()
@@ -65,7 +68,8 @@ describe('App', () => {
     await user.type(screen.getByPlaceholderText(/e\.g\. alice/i), 'alice')
     await user.type(screen.getByPlaceholderText(/Review2026!/i), 'Review2026!')
     await user.click(screen.getByRole('button', { name: /^sign in$/i }))
-    await waitFor(() => expect(screen.getByText('Alice Johnson')).toBeInTheDocument())
+    // Wait for the Sign Out button — unique to the authenticated view
+    await waitFor(() => expect(screen.getByRole('button', { name: /sign out/i })).toBeInTheDocument())
 
     await user.click(screen.getByRole('button', { name: /employees/i }))
     await waitFor(() => expect(screen.getByText(/employee list/i)).toBeInTheDocument())
