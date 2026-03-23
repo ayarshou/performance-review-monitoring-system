@@ -49,4 +49,10 @@ public class EmployeeRepository : IEmployeeRepository
 
     public Task<bool> ExistsAsync(int id) =>
         _db.Employees.AnyAsync(e => e.Id == id);
+
+    public async Task<IEnumerable<Employee>> GetSubordinatesWithReviewsAsync(int managerId) =>
+        await _db.Employees
+            .Where(e => e.ManagerId == managerId)
+            .Include(e => e.ReviewSessions)
+            .ToListAsync();
 }

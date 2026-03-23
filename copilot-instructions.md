@@ -10,7 +10,7 @@ This is a full-stack **Performance Review Monitoring System** composed of:
 | Frontend | React 18 (Vite), plain CSS |
 | Infrastructure | Docker, Docker Compose, Nginx |
 
-The system allows HR managers to track employee performance review cycles, assign review sessions, and monitor completion status. A background scheduler automatically emails reminders to employees and summary reports to managers.
+The system allows HR managers to track employee performance review cycles, assign review sessions, and monitor completion status. A background scheduler automatically emails reminders to employees and summary reports to managers. JWT-based authentication controls access to sensitive operations.
 
 ---
 
@@ -19,27 +19,42 @@ The system allows HR managers to track employee performance review cycles, assig
 ```
 api/
   Controllers/
+    AuthController.cs            – POST /api/auth/login (issues JWT)
     EmployeesController.cs       – CRUD for Employee (delegates to IEmployeeRepository)
+    ReviewController.cs          – Auth-protected: submit review + manager team-status
     ReviewSessionsController.cs  – CRUD for ReviewSession (delegates to IReviewSessionRepository)
   Data/
-    AppDbContext.cs               – EF Core DbContext, Fluent API config
+    AppDbContext.cs               – EF Core DbContext, Fluent API config (Employee, ReviewSession, User)
+  DTOs/
+    LoginRequest.cs              – Username + Password for login
+    SubmitReviewRequest.cs       – Optional Notes when completing a review
+    SubordinateReviewStatusDto.cs – Manager team-status response shape
+  Helpers/
+    PasswordHashHelper.cs        – PBKDF2 password hashing/verification (no external packages)
+  Middleware/
+    GlobalExceptionMiddleware.cs – Catches unhandled exceptions, logs, returns 500 JSON
   Migrations/                    – Auto-generated EF Core migrations
   Models/
     Employee.cs                  – Employee POCO
-    ReviewSession.cs             – ReviewSession POCO
+    ReviewSession.cs             – ReviewSession POCO (includes optional Notes field)
     ReviewStatus.cs              – Enum: Pending | Completed
+    User.cs                      – User POCO (Username, PasswordHash, Role, EmployeeId FK)
   Repositories/
-    IEmployeeRepository.cs       – Repository interface for Employee CRUD
+    IEmployeeRepository.cs       – Repository interface for Employee CRUD + GetSubordinatesWithReviewsAsync
     EmployeeRepository.cs        – EF Core implementation of IEmployeeRepository
     IReviewSessionRepository.cs  – Repository interface for ReviewSession CRUD + scheduler queries
     ReviewSessionRepository.cs   – EF Core implementation of IReviewSessionRepository
+    IUserRepository.cs           – Repository interface: GetByUsernameAsync, CreateAsync
+    UserRepository.cs            – EF Core implementation of IUserRepository
   Services/
     IEmailService.cs             – Email sending interface
     EmailService.cs              – MailKit SMTP implementation (settings from EmailSettings config)
     ReviewSchedulerService.cs    – BackgroundService: daily review reminders and manager summaries
-  Program.cs                     – App bootstrap, DI, middleware, auto-migrate
-  appsettings.json               – Connection string (Docker target: "db") + EmailSettings
-  appsettings.Development.json   – Connection string (localhost)
+  Validators/
+    SubmitReviewRequestValidator.cs – FluentValidation: Notes max 2000 chars
+  Program.cs                     – App bootstrap, DI, JWT auth, FluentValidation, middleware, auto-migrate
+  appsettings.json               – Connection string + JwtSettings + EmailSettings
+  appsettings.Development.json   – Local overrides (connection string + JwtSettings)
   PerformanceReviewApi.csproj
   Dockerfile
 
@@ -59,6 +74,8 @@ frontend/
 
 tests/
   PerformanceReviewApi.Tests/
+    Integration/
+      ReviewIntegrationTests.cs  – WebApplicationFactory integration tests (login → submit → verify DB)
     Services/
       ReviewSchedulerServiceTests.cs  – xUnit + Moq tests for ReviewSchedulerService
 
@@ -73,6 +90,12 @@ copilot-instructions.md          – This file
 
 ```
 HTTP Request
+    │
+    ▼
+GlobalExceptionMiddleware  (api/Middleware/)
+    │
+    ▼
+JWT Authentication / Authorization Middleware
     │
     ▼
 Controller  (api/Controllers/)
@@ -100,9 +123,34 @@ IEmailService  →  EmailService (MailKit)
 
 **Key DI registrations (`Program.cs`):**
 - `AppDbContext` → scoped  
-- `IEmployeeRepository` / `IReviewSessionRepository` → scoped  
+- `IEmployeeRepository` / `IReviewSessionRepository` / `IUserRepository` → scoped  
 - `IEmailService` → singleton (stateless)  
 - `ReviewSchedulerService` → hosted service (singleton `BackgroundService`)
+- FluentValidation validators → scanned from assembly via `AddValidatorsFromAssemblyContaining<Program>()`
+
+---
+
+## Authentication & Authorisation
+
+JWT Bearer tokens are issued by `POST /api/auth/login`.  
+Token claims: `sub` (userId), `unique_name` (username), `role` ("Manager" or "Employee"), `EmployeeId`.
+
+**Protecting endpoints:**
+- Add `[Authorize]` to require any valid JWT.
+- Add `[Authorize(Roles = "Manager")]` to restrict to Managers only.
+
+**Configuration (`appsettings.json` → `JwtSettings`):**
+
+```json
+"JwtSettings": {
+  "SecretKey": "PerformanceReviewSystem-SuperSecret-Key-2026!",
+  "Issuer": "PerformanceReviewApi",
+  "Audience": "PerformanceReviewClient",
+  "ExpiresInHours": "8"
+}
+```
+
+> Replace `SecretKey` with a strong secret (≥ 32 chars) in production.
 
 ---
 
@@ -125,17 +173,27 @@ IEmailService  →  EmailService (MailKit)
 - **Status** `ReviewStatus` – enum, stored as string (`Pending` / `Completed`)  
 - **ScheduledDate** `DateTime` – required  
 - **Deadline** `DateTime` – required  
+- **Notes** `string?` – optional review notes, max 2000 chars  
 - **Employee** `Employee` – navigation property  
+
+### User
+- **Id** `int` – primary key  
+- **Username** `string` – required, max 100, unique index  
+- **PasswordHash** `string` – PBKDF2 hash stored as `salt:hash` (Base64)  
+- **Role** `string` – "Manager" or "Employee"  
+- **EmployeeId** `int?` – optional FK to `Employee.Id` (SetNull on delete)  
+- **Employee** `Employee?` – navigation property  
 
 ### Relationships
 - **Manager → Subordinates**: one-to-many self-referencing on `Employee`. Delete behaviour: `RESTRICT`.  
 - **Employee → ReviewSessions**: one-to-many. Delete behaviour: `CASCADE`.
+- **User → Employee**: optional one-to-one (many users could share an Employee in theory). Delete behaviour: `SetNull`.
 
 ---
 
 ## Repository Pattern
 
-Both repositories implement the same base structure:
+Both Employee and ReviewSession repositories implement the same base structure:
 
 | Method | Description |
 |--------|-------------|
@@ -146,12 +204,25 @@ Both repositories implement the same base structure:
 | `DeleteAsync(id)` | Delete if exists (returns `false` when not found) |
 | `ExistsAsync(id)` | True/false existence check |
 
+`IEmployeeRepository` also exposes:
+
+| Method | Used by |
+|--------|---------|
+| `GetSubordinatesWithReviewsAsync(managerId)` | `ReviewController.GetTeamStatus` |
+
 `IReviewSessionRepository` also exposes two scheduler-specific queries:
 
 | Method | Used by |
 |--------|---------|
 | `GetPendingDueInRangeAsync(from, to)` | Monthly reminder pass |
 | `GetPendingNearDeadlineAsync(deadlineCutoff)` | 3-day manager summary pass |
+
+`IUserRepository` exposes:
+
+| Method | Used by |
+|--------|---------|
+| `GetByUsernameAsync(username)` | `AuthController.Login` |
+| `CreateAsync(user)` | Seeding / admin tooling |
 
 ---
 
@@ -194,14 +265,16 @@ Wraps every send in `try/catch`; logs the error and re-throws on failure.
 ## Key Conventions
 
 ### C# / .NET
-- **Namespace**: `PerformanceReviewApi` (root), sub-namespaces per folder (`*.Models`, `*.Data`, `*.Controllers`, `*.Repositories`, `*.Services`).
+- **Namespace**: `PerformanceReviewApi` (root), sub-namespaces per folder (`*.Models`, `*.Data`, `*.Controllers`, `*.Repositories`, `*.Services`, `*.DTOs`, `*.Helpers`, `*.Middleware`, `*.Validators`).
 - **File-scoped namespaces** (`namespace Foo;`) for all C# files.
 - **Implicit usings** and **nullable reference types** are enabled.
 - **Enum serialisation**: `ReviewStatus` is stored as a string in SQL Server and serialised as a string in JSON (`JsonStringEnumConverter`).
 - **Circular reference handling**: `ReferenceHandler.IgnoreCycles` is applied globally.
-- **Auto-migration**: `db.Database.Migrate()` runs at startup so the schema is always current.
+- **Auto-migration**: `db.Database.Migrate()` runs at startup (skipped for non-relational providers like InMemory).
 - **CORS**: permissive default policy (any origin/method/header) – tighten for production.
-- **Swagger**: always enabled (both dev and production inside Docker).
+- **Swagger**: always enabled (both dev and production inside Docker), with Bearer auth support.
+- **FluentValidation**: validators placed in `api/Validators/`, auto-scanned via `AddValidatorsFromAssemblyContaining<Program>()`, injected into controllers as `IValidator<T>`.
+- **Password hashing**: uses built-in `Rfc2898DeriveBytes.Pbkdf2` (SHA-256, 100 000 iterations) via `PasswordHashHelper`. No external crypto packages required.
 
 ### React / Vite
 - Components are functional with hooks (`useState`, `useEffect`).
@@ -228,6 +301,27 @@ Wraps every send in `try/catch`; logs the error and re-throws on failure.
 7. Create a controller in `api/Controllers/` that injects the repository interface.
 8. Add a React component in `frontend/src/components/`.
 
+### Protect a new endpoint with JWT
+1. Add `[Authorize]` to the controller class or action method.
+2. For role-based access: `[Authorize(Roles = "Manager")]`.
+3. Read user claims via `User.FindFirst("EmployeeId")?.Value` or `User.FindFirst(ClaimTypes.Role)?.Value`.
+
+### Add FluentValidation to a new endpoint
+1. Create a validator in `api/Validators/` that extends `AbstractValidator<TRequest>`.
+2. Inject `IValidator<TRequest>` into the controller.
+3. Call `await _validator.ValidateAsync(request)` and return `BadRequest(validation.Errors)` when invalid.
+
+### Create a new user (programmatic seeding)
+```csharp
+var user = new User {
+    Username = "alice",
+    PasswordHash = PasswordHashHelper.Hash("SecurePass!"),
+    Role = "Manager",
+    EmployeeId = 1
+};
+await userRepository.CreateAsync(user);
+```
+
 ### Change ReviewStatus values
 Edit `api/Models/ReviewStatus.cs`. If adding a value, create a new EF migration. Update the `<select>` in `ReviewSessionList.jsx`.
 
@@ -248,7 +342,8 @@ docker compose up --build
 cd api && dotnet ef database update
 ```
 
-### Run unit tests
+### Run all tests (unit + integration)
 ```bash
 cd tests/PerformanceReviewApi.Tests && dotnet test
 ```
+
