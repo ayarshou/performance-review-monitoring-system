@@ -1,40 +1,42 @@
 import { useState, useEffect } from 'react'
+import type { ReviewSession, ReviewStatus } from '../types'
+import apiClient from '../api/client'
 
 const API = '/api/reviewsessions'
 
 const emptyForm = {
   employeeId: '',
-  status: 'Pending',
+  status: 'Pending' as ReviewStatus,
   scheduledDate: '',
   deadline: '',
 }
 
 export default function ReviewSessionList() {
-  const [sessions, setSessions] = useState([])
+  const [sessions, setSessions] = useState<ReviewSession[]>([])
   const [form, setForm] = useState(emptyForm)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
+  const [error, setError] = useState<string | null>(null)
 
   const load = async () => {
     try {
       setLoading(true)
-      const res = await fetch(API)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      setSessions(await res.json())
+      const { data } = await apiClient.get<ReviewSession[]>(API)
+      setSessions(data)
       setError(null)
-    } catch (e) {
-      setError(e.message)
+    } catch {
+      setError('Failed to load review sessions.')
     } finally {
       setLoading(false)
     }
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { void load() }, [])
 
-  const handleChange = e =>
-    setForm(f => ({ ...f, [e.target.name]: e.target.value }))
+  const handleChange = (
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
+  ) => setForm((f) => ({ ...f, [e.target.name]: e.target.value }))
 
-  const handleSubmit = async e => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     const body = {
       employeeId: Number(form.employeeId),
@@ -42,23 +44,26 @@ export default function ReviewSessionList() {
       scheduledDate: form.scheduledDate,
       deadline: form.deadline,
     }
-    const res = await fetch(API, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    if (res.ok) { setForm(emptyForm); load() }
-    else setError(`Failed to create session: ${res.status}`)
+    try {
+      await apiClient.post(API, body)
+      setForm(emptyForm)
+      void load()
+    } catch {
+      setError('Failed to create review session.')
+    }
   }
 
-  const remove = async id => {
+  const remove = async (id: number) => {
     if (!window.confirm('Delete this review session?')) return
-    const res = await fetch(`${API}/${id}`, { method: 'DELETE' })
-    if (res.ok) load()
-    else setError(`Failed to delete: ${res.status}`)
+    try {
+      await apiClient.delete(`${API}/${id}`)
+      void load()
+    } catch {
+      setError('Failed to delete review session.')
+    }
   }
 
-  const badgeClass = status =>
+  const badgeClass = (status: ReviewStatus) =>
     status === 'Completed' ? 'badge badge-completed' : 'badge badge-pending'
 
   return (
@@ -68,7 +73,14 @@ export default function ReviewSessionList() {
         <form onSubmit={handleSubmit}>
           <label>
             Employee ID *
-            <input type="number" name="employeeId" value={form.employeeId} onChange={handleChange} required min="1" />
+            <input
+              type="number"
+              name="employeeId"
+              value={form.employeeId}
+              onChange={handleChange}
+              required
+              min="1"
+            />
           </label>
           <label>
             Status
@@ -79,17 +91,35 @@ export default function ReviewSessionList() {
           </label>
           <label>
             Scheduled Date *
-            <input type="date" name="scheduledDate" value={form.scheduledDate} onChange={handleChange} required />
+            <input
+              type="date"
+              name="scheduledDate"
+              value={form.scheduledDate}
+              onChange={handleChange}
+              required
+            />
           </label>
           <label>
             Deadline *
-            <input type="date" name="deadline" value={form.deadline} onChange={handleChange} required />
+            <input
+              type="date"
+              name="deadline"
+              value={form.deadline}
+              onChange={handleChange}
+              required
+            />
           </label>
           <div className="full-width">
-            <button type="submit" className="btn btn-primary">Schedule Session</button>
+            <button type="submit" className="btn btn-primary">
+              Schedule Session
+            </button>
           </div>
         </form>
-        {error && <p className="error-msg" style={{ marginTop: '0.5rem' }}>{error}</p>}
+        {error && (
+          <p className="error-msg" style={{ marginTop: '0.5rem' }}>
+            {error}
+          </p>
+        )}
       </section>
 
       <section>
@@ -109,15 +139,19 @@ export default function ReviewSessionList() {
               </tr>
             </thead>
             <tbody>
-              {sessions.map(s => (
+              {sessions.map((s) => (
                 <tr key={s.id}>
                   <td>{s.id}</td>
                   <td>{s.employee?.name ?? s.employeeId}</td>
-                  <td><span className={badgeClass(s.status)}>{s.status}</span></td>
+                  <td>
+                    <span className={badgeClass(s.status)}>{s.status}</span>
+                  </td>
                   <td>{s.scheduledDate?.slice(0, 10)}</td>
                   <td>{s.deadline?.slice(0, 10)}</td>
                   <td>
-                    <button className="btn btn-danger" onClick={() => remove(s.id)}>Delete</button>
+                    <button className="btn btn-danger" onClick={() => remove(s.id)}>
+                      Delete
+                    </button>
                   </td>
                 </tr>
               ))}

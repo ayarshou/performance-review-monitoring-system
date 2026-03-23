@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react'
+import type { Employee } from '../types'
+import apiClient from '../api/client'
 
 const API = '/api/employees'
 
@@ -11,51 +13,53 @@ const emptyForm = {
 }
 
 export default function EmployeeList() {
-  const [employees, setEmployees] = useState([])
+  const [employees, setEmployees] = useState<Employee[]>([])
   const [form, setForm] = useState(emptyForm)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
+  const [error, setError] = useState<string | null>(null)
 
   const load = async () => {
     try {
       setLoading(true)
-      const res = await fetch(API)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      setEmployees(await res.json())
+      const { data } = await apiClient.get<Employee[]>(API)
+      setEmployees(data)
       setError(null)
-    } catch (e) {
-      setError(e.message)
+    } catch {
+      setError('Failed to load employees.')
     } finally {
       setLoading(false)
     }
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { void load() }, [])
 
-  const handleChange = e =>
-    setForm(f => ({ ...f, [e.target.name]: e.target.value }))
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) =>
+    setForm((f) => ({ ...f, [e.target.name]: e.target.value }))
 
-  const handleSubmit = async e => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     const body = {
       ...form,
       hireDate: form.hireDate || new Date().toISOString(),
       managerId: form.managerId ? Number(form.managerId) : null,
     }
-    const res = await fetch(API, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    })
-    if (res.ok) { setForm(emptyForm); load() }
-    else setError(`Failed to create employee: ${res.status}`)
+    try {
+      await apiClient.post(API, body)
+      setForm(emptyForm)
+      void load()
+    } catch {
+      setError('Failed to create employee.')
+    }
   }
 
-  const remove = async id => {
+  const remove = async (id: number) => {
     if (!window.confirm('Delete this employee?')) return
-    const res = await fetch(`${API}/${id}`, { method: 'DELETE' })
-    if (res.ok) load()
-    else setError(`Failed to delete: ${res.status}`)
+    try {
+      await apiClient.delete(`${API}/${id}`)
+      void load()
+    } catch {
+      setError('Failed to delete employee.')
+    }
   }
 
   return (
@@ -77,17 +81,35 @@ export default function EmployeeList() {
           </label>
           <label>
             Hire Date *
-            <input type="date" name="hireDate" value={form.hireDate} onChange={handleChange} required />
+            <input
+              type="date"
+              name="hireDate"
+              value={form.hireDate}
+              onChange={handleChange}
+              required
+            />
           </label>
           <label>
             Manager ID (optional)
-            <input type="number" name="managerId" value={form.managerId} onChange={handleChange} min="1" />
+            <input
+              type="number"
+              name="managerId"
+              value={form.managerId}
+              onChange={handleChange}
+              min="1"
+            />
           </label>
           <div className="full-width">
-            <button type="submit" className="btn btn-primary">Add Employee</button>
+            <button type="submit" className="btn btn-primary">
+              Add Employee
+            </button>
           </div>
         </form>
-        {error && <p className="error-msg" style={{ marginTop: '0.5rem' }}>{error}</p>}
+        {error && (
+          <p className="error-msg" style={{ marginTop: '0.5rem' }}>
+            {error}
+          </p>
+        )}
       </section>
 
       <section>
@@ -108,7 +130,7 @@ export default function EmployeeList() {
               </tr>
             </thead>
             <tbody>
-              {employees.map(emp => (
+              {employees.map((emp) => (
                 <tr key={emp.id}>
                   <td>{emp.id}</td>
                   <td>{emp.name}</td>
@@ -117,7 +139,9 @@ export default function EmployeeList() {
                   <td>{emp.hireDate?.slice(0, 10)}</td>
                   <td>{emp.managerId ?? '—'}</td>
                   <td>
-                    <button className="btn btn-danger" onClick={() => remove(emp.id)}>Delete</button>
+                    <button className="btn btn-danger" onClick={() => remove(emp.id)}>
+                      Delete
+                    </button>
                   </td>
                 </tr>
               ))}
