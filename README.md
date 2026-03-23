@@ -55,9 +55,11 @@ A full-stack application for managing employee performance reviews. Employees an
 | `Id` | int | Primary key |
 | `Name` | string | |
 | `Email` | string | |
+| `Username` | string | Used for login (expected to be unique) |
 | `Position` | string | |
 | `HireDate` | DateTime | |
 | `ManagerId` | int? | Self-referencing FK (nullable for top-level) |
+| `PasswordHash` | string | Stored in DB only; never returned by the API |
 
 ### ReviewSession
 | Field | Type | Notes |
