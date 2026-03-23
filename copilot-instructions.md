@@ -62,7 +62,8 @@ api/
     SubmitReviewRequest.cs       – Optional Notes when completing a review
     SubordinateReviewStatusDto.cs – Manager team-status response shape
   Helpers/
-    PasswordHashHelper.cs        – PBKDF2 password hashing/verification
+    PasswordHashHelper.cs        – PBKDF2 password hashing/verification (Users table)
+    PasswordHelper.cs            – PBKDF2 password hashing/verification (Employees table)
   Middleware/
     GlobalExceptionMiddleware.cs – Catches unhandled exceptions, logs, returns 500 JSON
   Migrations/                    – Auto-generated EF Core migrations
@@ -95,6 +96,7 @@ frontend/
     components/
       EmployeeList.tsx            – Employee CRUD table
       ReviewSessionList.tsx       – Review session CRUD table
+      MyReviews.jsx              – Employee review sessions view
     pages/
       LoginPage.tsx               – Login form (axios, localStorage, error handling)
       LoginPage.css               – Login card styles (blue/grey palette, centered)
@@ -108,14 +110,21 @@ frontend/
     index.css                     – Tailwind directives + global styles
   .env                            – VITE_API_URL (gitignored, copy from .env.example)
   .env.example                    – Environment variable template
-  tailwind.config.js              – Tailwind content paths
-  postcss.config.js               – Tailwind + Autoprefixer PostCSS plugins
+  tailwind.config.cjs             – Tailwind content paths (CommonJS for Docker build)
+  postcss.config.cjs              – Tailwind + Autoprefixer PostCSS plugins (CommonJS)
   tsconfig.json                   – TypeScript compiler config (strict, JSX react-jsx)
   tsconfig.node.json              – TypeScript config for vite.config.ts
   vite.config.ts                  – Vite config: React plugin, dev proxy, Vitest settings
   nginx.conf                      – Nginx: serve SPA + proxy /api → backend
   package.json                    – scripts: dev / build / preview / test / type-check
   Dockerfile
+  Dockerfile.test                 – Test runner image (Vitest)
+
+api.Tests/                      # Backend unit + integration tests (xUnit + Moq)
+  Controllers/                    – Controller unit tests
+  Data/                          – DB seeder tests
+  Helpers/                       – Password helper tests + test DB factory
+  Integration/                   – Full HTTP pipeline tests via WebApplicationFactory
 
 tests/
   PerformanceReviewApi.Tests/
@@ -125,6 +134,7 @@ tests/
       ReviewSchedulerServiceTests.cs  – xUnit + Moq unit tests for ReviewSchedulerService
 
 docker-compose.yml               – db + api + frontend services
+docker-compose.test.yml          – Test runner (api-tests + frontend-tests)
 README.md
 copilot-instructions.md          – This file
 ```
@@ -232,13 +242,19 @@ apiClient.interceptors.request.use((config) => {
 ### Frontend (Vitest + Testing Library)
 - Test files live in `src/__tests__/`.
 - Setup file: `src/setupTests.ts` (imports `@testing-library/jest-dom`).
-- HTTP mocking: `axios-mock-adapter` wraps the shared `apiClient`.
-- Run: `cd frontend && npm test`
+- HTTP mocking: `axios-mock-adapter` wraps the shared `apiClient` for components using axios; plain `global.fetch` mocks for components using fetch directly (e.g. `MyReviews.jsx`).
+- Run: `cd frontend && npm test` (executes `vitest run` — single pass, CI-friendly).
 
 ### Backend (xUnit + Moq)
 - Integration tests use `WebApplicationFactory` with an in-memory DB.
 - Unit tests use `Moq` for repositories and `TimeProvider` for deterministic scheduling.
 - Run: `cd tests/PerformanceReviewApi.Tests && dotnet test`
+
+### Docker test compose
+```bash
+docker compose -f docker-compose.test.yml up --build --abort-on-container-exit
+```
+Runs both frontend and backend test suites in containers. Exit code `0` = all tests passed. No SQL Server or Nginx needed — backend uses an in-memory DB.
 
 ---
 
@@ -251,7 +267,7 @@ apiClient.interceptors.request.use((config) => {
 - **Circular reference handling**: `ReferenceHandler.IgnoreCycles` applied globally.
 - **Auto-migration**: runs at startup.
 - **FluentValidation**: validators in `api/Validators/`, auto-scanned.
-- **Password hashing**: `Rfc2898DeriveBytes.Pbkdf2` (SHA-256, 100 000 iterations).
+- **Password hashing**: Two helpers, both PBKDF2-SHA256 — `PasswordHashHelper` (100 000 iterations, for Users table) and `PasswordHelper` (10 000 iterations, for Employees table).
 
 ### Docker
 - Multi-stage builds for both API (`sdk→aspnet`) and frontend (`node→nginx`).
@@ -320,12 +336,17 @@ await userRepository.CreateAsync(new User {
 docker compose up --build
 ```
 
-### Run frontend tests
+### Run all tests in Docker
+```bash
+docker compose -f docker-compose.test.yml up --build --abort-on-container-exit
+```
+
+### Run frontend tests (locally)
 ```bash
 cd frontend && npm test
 ```
 
-### Run backend tests
+### Run backend tests (locally)
 ```bash
 cd tests/PerformanceReviewApi.Tests && dotnet test
 ```

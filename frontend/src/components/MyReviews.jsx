@@ -24,8 +24,8 @@ export default function MyReviews({ user }) {
         <h2>My Profile</h2>
         <table>
           <tbody>
-            <tr><th>Name</th>    <td>{user.name}</td></tr>
-            <tr><th>Email</th>   <td>{user.email}</td></tr>
+            <tr><th>Name</th><td>{user.name}</td></tr>
+            <tr><th>Email</th><td>{user.email}</td></tr>
             <tr><th>Position</th><td>{user.position}</td></tr>
           </tbody>
         </table>

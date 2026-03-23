@@ -8,7 +8,7 @@ A full-stack application for managing employee performance reviews. Employees an
 |-------|-----------|
 | Backend API | .NET 8 Web API + Entity Framework Core |
 | Database | SQL Server 2022 |
-| Frontend | React 18 + Vite (served by Nginx in production) |
+| Frontend | React 18 + TypeScript + Vite 6 + Tailwind CSS (served by Nginx in production) |
 | Containerisation | Docker + Docker Compose |
 
 ---
@@ -19,29 +19,67 @@ A full-stack application for managing employee performance reviews. Employees an
 .
 ├── api/                        # .NET 8 Web API
 │   ├── Controllers/
+│   │   ├── AuthController.cs           # POST /api/auth/login (issues JWT)
 │   │   ├── EmployeesController.cs      # CRUD for employees
+│   │   ├── ReviewController.cs         # Submit review + manager team-status
 │   │   └── ReviewSessionsController.cs # CRUD for review sessions
 │   ├── Data/
-│   │   └── AppDbContext.cs             # EF Core DB context
+│   │   ├── AppDbContext.cs             # EF Core DB context
+│   │   └── DbSeeder.cs                # Initial seed data
+│   ├── DTOs/                           # Request/Response shapes
+│   ├── Helpers/
+│   │   ├── PasswordHashHelper.cs       # PBKDF2 hashing (Users table)
+│   │   └── PasswordHelper.cs           # PBKDF2 hashing (Employees table)
+│   ├── Middleware/
+│   │   └── GlobalExceptionMiddleware.cs
 │   ├── Migrations/                     # EF Core auto-migrations
 │   ├── Models/
 │   │   ├── Employee.cs                 # Employee entity
 │   │   ├── ReviewSession.cs            # ReviewSession entity
-│   │   └── ReviewStatus.cs             # Pending | Completed enum
+│   │   ├── ReviewStatus.cs             # Pending | Completed enum
+│   │   └── User.cs                     # User entity (login credentials)
+│   ├── Repositories/                   # Data-access interfaces + implementations
+│   ├── Services/
+│   │   ├── EmailService.cs             # MailKit SMTP email sending
+│   │   └── ReviewSchedulerService.cs   # Background reminder scheduler
+│   ├── Validators/
+│   │   └── SubmitReviewRequestValidator.cs  # FluentValidation
 │   ├── appsettings.json
 │   ├── Dockerfile
+│   ├── Program.cs                      # DI, JWT auth, middleware, auto-migrate
 │   └── PerformanceReviewApi.csproj
-├── frontend/                   # React + Vite SPA
+├── frontend/                   # React + TypeScript + Vite SPA
 │   ├── src/
+│   │   ├── api/
+│   │   │   └── client.ts               # axios instance with JWT interceptor
 │   │   ├── components/
-│   │   │   ├── EmployeeList.jsx
-│   │   │   └── ReviewSessionList.jsx
-│   │   ├── App.jsx
-│   │   └── main.jsx
+│   │   │   ├── EmployeeList.tsx
+│   │   │   ├── ReviewSessionList.tsx
+│   │   │   └── MyReviews.jsx
+│   │   ├── pages/
+│   │   │   ├── LoginPage.tsx
+│   │   │   ├── LoginPage.css
+│   │   │   └── EmployeeDashboard.tsx
+│   │   ├── types/
+│   │   │   └── index.ts                # Shared TypeScript interfaces
+│   │   ├── __tests__/                  # Vitest + React Testing Library tests
+│   │   ├── App.tsx
+│   │   ├── main.tsx
+│   │   └── index.css                   # Tailwind directives
 │   ├── Dockerfile
-│   ├── nginx.conf              # Nginx config with /api proxy
-│   └── package.json
-├── docker-compose.yml
+│   ├── Dockerfile.test                 # Test runner image
+│   ├── nginx.conf                      # Nginx: serve SPA + proxy /api
+│   ├── package.json
+│   ├── tailwind.config.cjs
+│   ├── postcss.config.cjs
+│   ├── vite.config.ts
+│   └── tsconfig.json
+├── api.Tests/                  # Backend unit tests (xUnit + Moq)
+├── tests/
+│   └── PerformanceReviewApi.Tests/     # Integration + scheduler tests
+├── docker-compose.yml                  # Full stack (db + api + frontend)
+├── docker-compose.test.yml             # Test runner (api-tests + frontend-tests)
+├── copilot-instructions.md
 └── README.md
 ```
 
@@ -69,6 +107,16 @@ A full-stack application for managing employee performance reviews. Employees an
 | `Status` | enum | `Pending` \| `Completed` |
 | `ScheduledDate` | DateTime | |
 | `Deadline` | DateTime | |
+| `Notes` | string? | Optional notes when completing a review |
+
+### User
+| Field | Type | Notes |
+|-------|------|-------|
+| `Id` | int | Primary key |
+| `Username` | string | Unique login name |
+| `PasswordHash` | string | PBKDF2-SHA256 `salt:hash` – never returned by the API |
+| `Role` | string | `Manager` or `Employee` |
+| `EmployeeId` | int? | FK → Employee (nullable) |
 
 ---
 
@@ -76,6 +124,13 @@ A full-stack application for managing employee performance reviews. Employees an
 
 Base URL (Docker): `http://localhost:5000`  
 Swagger UI: `http://localhost:5000/swagger`
+
+### Authentication — `/api/auth`
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/auth/login` | Authenticate and receive a JWT token |
+
+The login endpoint accepts `{ "username": "...", "password": "..." }` and returns a JWT along with user profile data. Credentials are checked against the **Users** table first, then the **Employees** table as a fallback.
 
 ### Employees — `/api/employees`
 | Method | Path | Description |
@@ -329,7 +384,13 @@ dotnet ef migrations remove
 
 ---
 
-## API Endpoints
+## API Endpoints (quick reference)
+
+### Authentication  `POST /api/auth/login`
+
+| Method | Route | Description |
+|--------|-------|-------------|
+| POST | `/api/auth/login` | Authenticate and receive a JWT |
 
 ### Employees  `GET|POST /api/employees`  ·  `GET|PUT|DELETE /api/employees/{id}`
 
@@ -362,8 +423,10 @@ Employee
 Id           INT IDENTITY PK
 Name         NVARCHAR(100) NOT NULL
 Email        NVARCHAR(200) NOT NULL
+Username     NVARCHAR(50)  NULL      (unique, used for login)
 Position     NVARCHAR(100) NOT NULL
 HireDate     DATETIME2     NOT NULL
+PasswordHash NVARCHAR(MAX) NULL      (PBKDF2-SHA256, never returned by API)
 ManagerId    INT           NULL  →  FK → Employee(Id)   [self-ref, RESTRICT]
 
 ReviewSession
@@ -373,12 +436,22 @@ EmployeeId     INT          NOT NULL  →  FK → Employee(Id)  [CASCADE]
 Status         NVARCHAR     NOT NULL  (Pending | Completed)
 ScheduledDate  DATETIME2    NOT NULL
 Deadline       DATETIME2    NOT NULL
+Notes          NVARCHAR(MAX) NULL
+
+User
+────────────────────────────────────────
+Id             INT IDENTITY PK
+Username       NVARCHAR(200) NOT NULL  (unique)
+PasswordHash   NVARCHAR(MAX) NOT NULL  (PBKDF2-SHA256)
+Role           NVARCHAR(50)  NOT NULL  (Manager | Employee)
+EmployeeId     INT           NULL  →  FK → Employee(Id)
 ```
 
 **Relationships**
 
 - `Employee.ManagerId → Employee.Id`: self-referencing one-to-many — one Manager has many Subordinates.
 - `ReviewSession.EmployeeId → Employee.Id`: one Employee has many ReviewSessions.
+- `User.EmployeeId → Employee.Id`: optional link between login user and employee record.
 
 ---
 

@@ -19,9 +19,11 @@ describe('MyReviews', () => {
   it('shows the logged-in user profile information', async () => {
     global.fetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve([]) })
     render(<MyReviews user={mockUser} />)
-    expect(screen.getByText('Eva Brown')).toBeInTheDocument()
-    expect(screen.getByText('eva.brown@company.com')).toBeInTheDocument()
-    expect(screen.getByText('Senior Software Engineer')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText('Eva Brown')).toBeInTheDocument()
+      expect(screen.getByText('eva.brown@company.com')).toBeInTheDocument()
+      expect(screen.getByText('Senior Software Engineer')).toBeInTheDocument()
+    })
   })
 
   it('fetches /api/reviewsessions/employee/{userId} on mount', async () => {
