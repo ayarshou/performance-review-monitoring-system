@@ -4,6 +4,43 @@ A full-stack application for managing employee performance reviews, built with *
 
 ---
 
+## Quick Start (Docker)
+
+> **Requires:** [Docker Desktop](https://www.docker.com/products/docker-desktop/) 24+ (includes Docker Compose v2).
+
+```bash
+# 1. Clone the repository
+git clone https://github.com/ayarshou/performance-review-monitoring-system.git
+cd performance-review-monitoring-system
+
+# 2. Build and start all three services (database, API, frontend)
+docker compose up --build
+```
+
+Once all containers are healthy, open your browser:
+
+| Service | URL |
+|---------|-----|
+| **Frontend** (React app) | <http://localhost:3000> |
+| **API** (Swagger UI) | <http://localhost:5000/swagger> |
+
+> The API waits for the database to be ready before starting.  
+> EF Core migrations run automatically on first boot — no manual setup needed.
+
+To run the stack **in the background** (detached mode):
+
+```bash
+docker compose up --build -d
+```
+
+To stop and remove all containers:
+
+```bash
+docker compose down
+```
+
+---
+
 ## Project Structure
 
 ```
@@ -65,7 +102,11 @@ cd performance-review-monitoring-system
 
 ### 2. Start the entire stack
 ```bash
+# Foreground (logs stream to the terminal)
 docker compose up --build
+
+# Detached / background mode
+docker compose up --build -d
 ```
 
 This command will:
